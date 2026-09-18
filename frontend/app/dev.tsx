@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
 import { ks } from "@/src/lib/ks";
+import { devStrings, type DevLang } from "@/src/lib/en";
 import {
   apiGet,
   apiPost,
@@ -146,6 +147,19 @@ function Dashboard({ token }: { token: string }) {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+
+  const [lang, setLang] = useState<DevLang>("ks");
+  const ks = devStrings(lang); // shadow module ks with the chosen language
+
+  useEffect(() => {
+    storage.getItem<DevLang>("dev_lang", "ks").then((v) => v && setLang(v));
+  }, []);
+
+  const toggleLang = () => {
+    const next: DevLang = lang === "en" ? "ks" : "en";
+    setLang(next);
+    void storage.setItem("dev_lang", next);
+  };
 
   const settingsQuery = useQuery({
     queryKey: ["devSettings"],
@@ -381,6 +395,10 @@ function Dashboard({ token }: { token: string }) {
       >
         <View style={styles.dashHeader}>
           <Text style={styles.dashTitle}>{ks.passwordTitle}</Text>
+          <Pressable testID="dev-lang-toggle" onPress={toggleLang} style={({ pressed }) => [styles.langToggle, pressed && { opacity: 0.8 }]}>
+            <Ionicons name="language" size={15} color={colors.brandPrimary} />
+            <Text style={styles.langToggleText}>{ks.translate}</Text>
+          </Pressable>
         </View>
 
         {/* Customization */}
@@ -772,7 +790,23 @@ const useStyles = makeStyles((colors) => ({
   },
   dashWrap: { flex: 1, backgroundColor: colors.surface },
   flex: { flex: 1 },
-  dashHeader: { paddingHorizontal: spacing.lg },
+  dashHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  langToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    height: 34,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary,
+  },
+  langToggleText: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "700" },
   dashTitle: {
     color: colors.onSurface,
     fontSize: 22,

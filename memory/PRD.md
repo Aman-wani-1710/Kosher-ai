@@ -38,7 +38,8 @@ Build a Chatbot + AI Voice Assistant for the **Kashmiri language**. Modern chat 
 - [x] Voice characters with uploadable avatar photos (Developer Options + shown in voice mode).
 - [x] Full layout control in Developer Options: app name, tagline, logo position (left/center/right), feature toggles, vision model.
 - [x] Input-script switcher (Kashmiri/Urdu Perso-Arabic ↔ English) with RTL/LTR + placeholder swap.
-- [x] Verified: 22/22 backend tests + frontend flows via testing agent.
+- [x] Developer Options one-tap English ↔ Kashmiri language toggle (persisted).
+- [x] Verified: 22/22 backend tests; Google sign-in reaches Google OAuth; English toggle + script switcher confirmed via screenshots.
 
 ## Backlog (prioritized)
 - **P1:** Streaming TTS (speak as tokens arrive) for lower latency in voice mode.
