@@ -4,6 +4,15 @@ import { fetch as expoFetch } from "expo/fetch";
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
 export const API_URL = `${BACKEND_URL}/api`;
 
+// In-memory auth token (mirrors secure storage). Set by AuthContext.
+let authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+function authHeaders(): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -30,7 +39,7 @@ async function parseError(res: Response): Promise<ApiError> {
 
 export async function apiGet<T>(path: string, token?: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
-    headers: token ? { "X-Dev-Token": token } : undefined,
+    headers: { ...authHeaders(), ...(token ? { "X-Dev-Token": token } : {}) },
   });
   if (!res.ok) throw await parseError(res);
   return (await res.json()) as T;
@@ -41,10 +50,17 @@ export async function apiPost<T>(path: string, body?: unknown, token?: string): 
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(token ? { "X-Dev-Token": token } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (!res.ok) throw await parseError(res);
+  return (await res.json()) as T;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, { method: "DELETE", headers: authHeaders() });
   if (!res.ok) throw await parseError(res);
   return (await res.json()) as T;
 }
@@ -54,6 +70,7 @@ export async function apiPut<T>(path: string, body: unknown, token?: string): Pr
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(token ? { "X-Dev-Token": token } : {}),
     },
     body: JSON.stringify(body),
@@ -75,7 +92,7 @@ export async function apiUpload<T>(path: string, file: UploadFileInput, token?: 
   }
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: token ? { "X-Dev-Token": token } : undefined,
+    headers: { ...authHeaders(), ...(token ? { "X-Dev-Token": token } : {}) },
     body: form,
   });
   if (!res.ok) throw await parseError(res);
@@ -92,14 +109,18 @@ export type ChatEvent =
   | { type: "error"; detail: string };
 
 export async function streamChat(
-  text: string,
+  payload: { text: string; conversation_id?: string; attachment_ids?: string[] },
   onEvent: (ev: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await expoFetch(`${API_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      text: payload.text,
+      conversation_id: payload.conversation_id ?? "guest",
+      attachment_ids: payload.attachment_ids ?? [],
+    }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -138,9 +159,23 @@ export type VoiceModel = {
   voice_id: string;
   language_code: string;
   model_name: string;
+  avatar_path?: string | null;
+  avatar_url?: string | null;
+};
+
+export type Features = {
+  voice_mode: boolean;
+  attachments: boolean;
+  auto_speak: boolean;
+  input_switcher: boolean;
+  show_tagline: boolean;
 };
 
 export type AppConfig = {
+  app_name: string;
+  tagline: string;
+  logo_position: "left" | "center" | "right";
+  features: Features;
   voice_models: VoiceModel[];
   active_voice_model_id: string;
   stt_provider: string;
@@ -152,17 +187,40 @@ export type AppConfig = {
   llm_ready: boolean;
 };
 
+export type AttachmentMeta = {
+  id: string;
+  kind: "image" | "pdf" | "file";
+  name: string;
+  mime: string;
+  url: string;
+};
+
 export type ChatMsg = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  attachments?: { id: string; kind: string; name: string; mime: string }[];
   created_at: string;
 };
+
+export type Conversation = {
+  id: string;
+  title: string;
+  updated_at: string;
+  created_at: string;
+};
+
+export type AuthUser = { user_id: string; email: string; name: string; picture: string };
 
 export type DevKeyInfo = { configured: boolean; preview: string };
 
 export type DevSettings = {
+  app_name: string;
+  tagline: string;
+  logo_position: "left" | "center" | "right";
+  features: Features;
   llm_model: string;
+  vision_model: string;
   system_prompt: string;
   stt_provider: string;
   tts_provider: string;

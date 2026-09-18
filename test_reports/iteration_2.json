@@ -1,0 +1,34 @@
+{
+  "summary": "Full v2 verification of Kosher AI. Backend: 22/22 pytest cases pass on the public preview URL. New /api/config returns app_name, tagline, logo_position, features{voice_mode,attachments,auto_speak,input_switcher,show_tagline}, voice_models each with avatar_url (null by default), plus prior fields. Auth negative paths: POST /api/auth/session {session_id:'invalid'} -> 401, GET /api/auth/me without Authorization -> 401, GET /api/conversations without auth -> 401. Guest optional-auth: GET /api/history?conversation_id=guest -> [], POST /api/chat streams SSE deltas + done with message_id and a Kashmiri Perso-Arabic reply saved under user_id=null, POST /api/chat/clear?conversation_id=guest -> ok. Attachments: PNG upload -> {kind:'image', mime:'image/png', url:/api/files/attachment/<id>}; GET that url returns the actual PNG bytes (magic \\x89PNG verified); PDF upload -> kind:'pdf'; audio/mpeg -> 415. Vision chat: POST /api/chat with attachment_ids=[<png>] routes to Gemini via EMERGENT_LLM_KEY and returns a non-empty reply + done event (no error frame). Dev: /api/dev/unlock wrong->401, '20791'->200 token; GET /api/dev/settings needs X-Dev-Token and returns app_name, tagline, logo_position, features, vision_model, voice_models, masked keys. PUT /api/dev/settings updates app_name, tagline, logo_position 'center', features {voice_mode:false} while preserving other flags, vision_model — all reflected in /api/config; invalid logo_position 'banana' is ignored (stays 'center'); invalid stt_provider -> 422; empty voice_models -> 422. Voice avatars: POST /api/dev/voice/female-1/avatar with PNG returns avatar_url, /api/config shows the voice's avatar_url non-null, GET /api/files/voice/female-1 returns image bytes, and the avatar_path PERSISTS after a subsequent PUT /api/dev/settings that sends voice_models WITHOUT avatar_path (server merges the existing avatar_path). Speech: /api/stt returns 400 'not configured' (Azure key absent), /api/tts returns 400 when active voice's provider key is missing, /api/dev/test-tts returns 400 when provider key missing. Frontend smoke-tested at 390x844: app loads (Kosher AI header + Kashmiri tagline visible), menu opens showing guest state (مہمان), Google sign-in button (sign-in-btn), new chat (new-chat-btn), chat send works and messages populate chat-list, script-switch-button visible (input_switcher feature ON). Deprecated packages detected: none — repo already uses expo-audio/expo-video. No SafeAreaView issues detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_kosher_v2.py",
+    "/app/backend/tests/test_kosher_backend.py",
+    "/app/test_reports/pytest/pytest_v2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py chat handler builds an LlmChat with initial_messages=messages where messages[0] is the system role AND passes system_message=s.system_prompt — duplicate system context sent to the model. Consider dropping the system entry from initial_messages since system_message already handles it.",
+    "server.py conversations update on POST /api/chat uses `{\"_id\": ObjectId(body.conversation_id)}` and $setOnInsert with upsert=False (default), so brand-new conversation_ids passed by clients silently no-op. The frontend must POST /api/conversations first; document this contract clearly or make chat upsert the conversation.",
+    "server.py PUT /dev/settings features merge is `{**DEFAULT_FEATURES, **s.features, **body.features}` — s.features has whatever the DB stored, so unknown feature keys previously written will remain forever. Fine for now; note if you ever want to drop a flag.",
+    "server.py voice_models put path preserves avatar_path only when the incoming model's id matches an existing one. If the client renames or reorders ids, avatars are lost silently — acceptable but worth noting.",
+    "server.py has NO length/size sanity for text field on /api/chat beyond Pydantic max_length=6000; combined with 15MB attachment cap this is fine."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_kosher_v2.py (new)",
+    "/app/test_reports/pytest/pytest_v2_results.xml (generated)",
+    "/app/test_reports/iteration_2.json (this file)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% (critical flows verified)"},
+  "seed_data_creation": "Tests upload a small in-memory PNG and PDF via /api/attachments/upload and one PNG as female-1 voice avatar. These are stored in Emergent object storage and referenced by attachment/settings docs. Guest chat messages are created and then soft-cleared. Layout settings are toggled during PUT tests then restored (app_name/tagline unchanged from defaults, logo_position restored, active_voice_model_id restored to female-1, voice_mode feature restored to true). No user accounts created (real Google OAuth intentionally not exercised).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Regression suites: /app/backend/tests/test_kosher_backend.py (v1, 17 tests) and /app/backend/tests/test_kosher_v2.py (v2, 22 tests). Both use EXPO_PUBLIC_BACKEND_URL from env (no default). Dev password 20791. Google OAuth cannot be tested headless — only negative/guest paths covered. TestVoiceAvatar leaves female-1 with a valid uploaded avatar in object storage; if you need clean defaults, wipe the mongo settings.voice_models[*].avatar_path or delete the settings doc. Vision chat used a 2x2 red PNG — Gemini still returned a Kashmiri reply, confirming the emergent-key -> gemini-2.5-flash route works.",
+  "rca_of_issue": "N/A — no bugs found in this iteration."
+}

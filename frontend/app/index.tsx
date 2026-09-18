@@ -35,17 +35,21 @@ import {
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
 import { ks } from "@/src/lib/ks";
 import {
+  API_URL,
   apiGet,
   apiPost,
   apiUpload,
   logoSource,
   streamChat,
   type AppConfig,
+  type AttachmentMeta,
   type ChatMsg,
   type VoiceModel,
 } from "@/src/lib/api";
 import { playBase64, stopPlayback } from "@/src/lib/player";
 import { storage } from "@/src/utils/storage";
+import { useAuth } from "@/src/lib/auth";
+import { pickAndUploadDocument, pickAndUploadPhoto } from "@/src/lib/attachments";
 import { LogoHeader } from "@/src/components/logo-header";
 import { ChatBubble } from "@/src/components/chat-bubble";
 import { TypingDots } from "@/src/components/typing-dots";
@@ -53,12 +57,21 @@ import { Toast } from "@/src/components/toast";
 import { VoicePicker } from "@/src/components/voice-picker";
 import { PasswordModal } from "@/src/components/password-modal";
 import { MicPermissionModal } from "@/src/components/mic-permission-modal";
+import { MenuSheet } from "@/src/components/menu-sheet";
 
 const ACTIVE_VOICE_KEY = "active_voice_model_id";
 const AUTOSPEAK_KEY = "autospeak_enabled";
+const SCRIPT_KEY = "input_script";
 const DEV_TOKEN_KEY = "dev_token";
 
 type ListItem = ChatMsg & { streaming?: boolean };
+type Script = "perso" | "urdu" | "english";
+const SCRIPT_ORDER: Script[] = ["perso", "urdu", "english"];
+const SCRIPT_LABEL: Record<Script, string> = {
+  perso: ks.scriptPerso,
+  urdu: ks.scriptUrdu,
+  english: ks.scriptEnglish,
+};
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -66,9 +79,13 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
+  const [conversationId, setConversationId] = useState("guest");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [attaching, setAttaching] = useState(false);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -80,38 +97,37 @@ export default function ChatScreen() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [activeVoiceId, setActiveVoiceId] = useState<string | null>(null);
+  const [script, setScript] = useState<Script>("perso");
 
-  const seededRef = useRef(false);
   const autoSpeakRef = useRef(true);
   const activeVoiceRef = useRef<string | null>(null);
   const sheetRef = useRef<any>(null);
+  const menuRef = useRef<any>(null);
 
   const showToast = useCallback((msg: string) => setToastMsg(msg), []);
 
-  const configQuery = useQuery({
-    queryKey: ["config"],
-    queryFn: () => apiGet<AppConfig>("/config"),
-  });
+  const configQuery = useQuery({ queryKey: ["config"], queryFn: () => apiGet<AppConfig>("/config") });
   const config = configQuery.data;
-  const historyQuery = useQuery({ queryKey: ["history"], queryFn: () => apiGet<ChatMsg[]>("/history") });
+  const features = config?.features;
+
+  const historyQuery = useQuery({
+    queryKey: ["history", conversationId],
+    queryFn: () => apiGet<ChatMsg[]>(`/history?conversation_id=${conversationId}`),
+  });
 
   useEffect(() => {
-    if (historyQuery.data && !seededRef.current) {
-      seededRef.current = true;
-      setMessages(historyQuery.data);
-    }
+    if (historyQuery.data) setMessages(historyQuery.data);
   }, [historyQuery.data]);
 
   useEffect(() => {
-    storage.getItem(ACTIVE_VOICE_KEY, "").then((id) => {
-      if (id) setActiveVoiceId(id);
-    });
+    storage.getItem(ACTIVE_VOICE_KEY, "").then((id) => id && setActiveVoiceId(id));
     storage.getItem(AUTOSPEAK_KEY, true).then((v) => {
       if (v !== null) {
         setAutoSpeak(v);
         autoSpeakRef.current = v;
       }
     });
+    storage.getItem<Script>(SCRIPT_KEY, "perso").then((v) => v && setScript(v));
   }, []);
 
   const activeVoice = useMemo(() => {
@@ -129,7 +145,7 @@ export default function ChatScreen() {
     activeVoiceRef.current = activeVoice?.id ?? null;
   }, [activeVoice?.id]);
 
-  // --- recording -----------------------------------------------------------
+  // recording
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recState = useAudioRecorderState(recorder);
   const pulse = useSharedValue(1);
@@ -152,14 +168,10 @@ export default function ChatScreen() {
   }
 
   async function onMicPress() {
-    if (recState.isRecording) {
-      await stopAndTranscribe();
-      return;
-    }
+    if (recState.isRecording) return stopAndTranscribe();
     const perm = await AudioModule.getRecordingPermissionsAsync();
-    if (perm.granted) {
-      await startRecording();
-    } else {
+    if (perm.granted) await startRecording();
+    else {
       setPermMode(perm.canAskAgain ? "explain" : "blocked");
       setPermVisible(true);
     }
@@ -173,9 +185,7 @@ export default function ChatScreen() {
     } else if (perm.canAskAgain) {
       setPermVisible(false);
       showToast(ks.micDeniedToast);
-    } else {
-      setPermMode("blocked");
-    }
+    } else setPermMode("blocked");
   }
 
   async function stopAndTranscribe() {
@@ -186,19 +196,13 @@ export default function ChatScreen() {
       await setAudioModeAsync({ allowsRecording: false });
       const uri = recorder.uri;
       if (!uri) throw new Error("no recording");
-      let file: any;
-      if (Platform.OS === "web") {
-        const blob = await (await fetch(uri)).blob();
-        file = { blob, name: "recording.wav" };
-      } else {
-        file = { uri, name: "recording.m4a", type: "audio/m4a" };
-      }
-      const res = await apiUpload<{ text: string; provider: string }>("/stt", file);
+      const file: any =
+        Platform.OS === "web"
+          ? { blob: await (await fetch(uri)).blob(), name: "recording.wav" }
+          : { uri, name: "recording.m4a", type: "audio/m4a" };
+      const res = await apiUpload<{ text: string }>("/stt", file);
       const text = (res.text ?? "").trim();
-      if (!text) {
-        showToast(ks.errorGeneric);
-        return;
-      }
+      if (!text) return showToast(ks.errorGeneric);
       await sendMessage(text);
     } catch (e: any) {
       showToast(e?.status === 400 ? ks.keysMissing : ks.errorGeneric);
@@ -207,37 +211,45 @@ export default function ChatScreen() {
     }
   }
 
-  // --- chat ----------------------------------------------------------------
   const sendMessage = useCallback(
     async (text: string) => {
       const clean = text.trim();
-      if (!clean || sending) return;
+      const atts = attachments;
+      if ((!clean && atts.length === 0) || sending) return;
       Keyboard.dismiss();
       const now = new Date().toISOString();
-      setMessages((m) => [...m, { id: `local-${now}`, role: "user", text: clean, created_at: now }]);
+      setMessages((m) => [
+        ...m,
+        {
+          id: `local-${now}`,
+          role: "user",
+          text: clean,
+          attachments: atts.map((a) => ({ id: a.id, kind: a.kind, name: a.name, mime: a.mime })),
+          created_at: now,
+        },
+      ]);
       setInput("");
+      setAttachments([]);
       setSending(true);
       setStreamingText("");
       try {
-        await streamChat(clean, (ev) => {
-          if (ev.type === "delta") {
-            setStreamingText((s) => (s ?? "") + ev.content);
-          } else if (ev.type === "done") {
-            const reply: ChatMsg = {
-              id: ev.message_id,
-              role: "assistant",
-              text: ev.reply,
-              created_at: new Date().toISOString(),
-            };
-            setMessages((m) => [...m, reply]);
-            setStreamingText(null);
-            queryClient.invalidateQueries({ queryKey: ["history"] });
-            if (autoSpeakRef.current) void speakText(reply.text, reply.id);
-          } else if (ev.type === "error") {
-            setStreamingText(null);
-            showToast(ev.detail.toLowerCase().includes("key") ? ks.keysMissing : ev.detail.slice(0, 90));
-          }
-        });
+        await streamChat(
+          { text: clean, conversation_id: conversationId, attachment_ids: atts.map((a) => a.id) },
+          (ev) => {
+            if (ev.type === "delta") setStreamingText((s) => (s ?? "") + ev.content);
+            else if (ev.type === "done") {
+              const reply: ChatMsg = { id: ev.message_id, role: "assistant", text: ev.reply, created_at: new Date().toISOString() };
+              setMessages((m) => [...m, reply]);
+              setStreamingText(null);
+              queryClient.invalidateQueries({ queryKey: ["history", conversationId] });
+              queryClient.invalidateQueries({ queryKey: ["conversations"] });
+              if (autoSpeakRef.current) void speakText(reply.text, reply.id);
+            } else if (ev.type === "error") {
+              setStreamingText(null);
+              showToast(ev.detail.toLowerCase().includes("key") ? ks.keysMissing : ev.detail.slice(0, 90));
+            }
+          },
+        );
       } catch {
         showToast(ks.noNetwork);
       } finally {
@@ -246,36 +258,32 @@ export default function ChatScreen() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sending, queryClient],
+    [sending, queryClient, conversationId, attachments],
   );
 
   async function speakText(text: string, id: string) {
     stopPlayback();
     setSpeakLoadingId(id);
     try {
-      const res = await apiPost<{ mime: string; audio_base64: string; voice_model_id: string }>("/tts", {
+      const res = await apiPost<{ mime: string; audio_base64: string }>("/tts", {
         text,
         voice_model_id: activeVoiceRef.current ?? undefined,
       });
       setSpeakLoadingId(null);
       setSpeakingId(id);
-      await playBase64(res.audio_base64, res.mime, () =>
-        setSpeakingId((cur) => (cur === id ? null : cur)),
-      );
+      await playBase64(res.audio_base64, res.mime, () => setSpeakingId((c) => (c === id ? null : c)));
     } catch (e: any) {
       showToast(e?.status === 400 ? ks.keysMissing : ks.errorGeneric);
     } finally {
-      setSpeakLoadingId((cur) => (cur === id ? null : cur));
+      setSpeakLoadingId((c) => (c === id ? null : c));
     }
   }
 
   const listData = useMemo<ListItem[]>(() => {
     const arr: ListItem[] = [...messages].map((m) => ({ ...m })).reverse();
-    if (streamingText !== null && streamingText.length > 0) {
+    if (streamingText !== null && streamingText.length > 0)
       arr.unshift({ id: "streaming", role: "assistant", text: streamingText, created_at: "" });
-    } else if (sending) {
-      arr.unshift({ id: "typing", role: "assistant", text: "", created_at: "", streaming: true });
-    }
+    else if (sending) arr.unshift({ id: "typing", role: "assistant", text: "", created_at: "", streaming: true });
     return arr;
   }, [messages, streamingText, sending]);
 
@@ -284,19 +292,49 @@ export default function ChatScreen() {
     activeVoiceRef.current = vm.id;
     await storage.setItem(ACTIVE_VOICE_KEY, vm.id);
     sheetRef.current?.dismiss();
-    queryClient.invalidateQueries({ queryKey: ["config"] });
   }
 
   async function clearChat() {
     try {
-      await apiPost("/chat/clear");
-      seededRef.current = true;
+      await apiPost(`/chat/clear?conversation_id=${conversationId}`);
       setMessages([]);
-      queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["history", conversationId] });
       showToast(ks.cleared);
     } catch {
       showToast(ks.noNetwork);
     }
+  }
+
+  async function addPhoto() {
+    if (attaching) return;
+    setAttaching(true);
+    try {
+      const a = await pickAndUploadPhoto();
+      if (a) setAttachments((p) => [...p, a]);
+    } catch (e: any) {
+      showToast(e?.message === "permission" ? ks.micBlockedBody : ks.errorGeneric);
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function addDocument() {
+    if (attaching) return;
+    setAttaching(true);
+    try {
+      const a = await pickAndUploadDocument();
+      if (a) setAttachments((p) => [...p, a]);
+    } catch {
+      showToast(ks.errorGeneric);
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  function cycleScript() {
+    const next = SCRIPT_ORDER[(SCRIPT_ORDER.indexOf(script) + 1) % SCRIPT_ORDER.length];
+    setScript(next);
+    void storage.setItem(SCRIPT_KEY, next);
   }
 
   const logoTs = useMemo(() => {
@@ -304,13 +342,38 @@ export default function ChatScreen() {
     return Date.now();
   }, [config?.logo_ts]);
   const logo = useMemo(() => logoSource(config, logoTs), [config, logoTs]);
-
+  const isRtl = script !== "english";
   const recordingNow = recState.isRecording;
+  const canSend = input.trim().length > 0 || attachments.length > 0;
 
   return (
     <View style={styles.container}>
       <View style={[styles.headerWrap, { paddingTop: insets.top + spacing.sm }]}>
-        <LogoHeader source={logo} onEasterEgg={() => setPasswordOpen(true)} onHint={() => showToast(ks.easterHint)} />
+        <LogoHeader
+          source={logo}
+          appName={config?.app_name ?? ks.appName}
+          tagline={config?.tagline ?? ks.tagline}
+          showTagline={features?.show_tagline ?? true}
+          position={config?.logo_position ?? "left"}
+          onEasterEgg={() => setPasswordOpen(true)}
+          onHint={() => showToast(ks.easterHint)}
+          onLogoTap={() => menuRef.current?.present()}
+          onMenu={() => menuRef.current?.present()}
+        />
+        <View style={styles.headerActions}>
+          {features?.voice_mode ? (
+            <Pressable testID="voice-mode-button" onPress={() => router.push("/voice")} style={({ pressed }) => [styles.actionChip, pressed && { opacity: 0.8 }]}>
+              <Ionicons name="mic-circle" size={18} color={colors.brandPrimary} />
+            </Pressable>
+          ) : null}
+          <Pressable testID="clear-chat-button" onPress={clearChat} style={({ pressed }) => [styles.actionChip, pressed && { opacity: 0.7 }]}>
+            <Ionicons name="trash-outline" size={16} color={colors.muted} />
+          </Pressable>
+          <Pressable testID="voice-picker-button" onPress={() => sheetRef.current?.present()} style={({ pressed }) => [styles.voiceChip, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="musical-notes" size={15} color={colors.brandPrimary} />
+            <Text style={styles.voiceChipText} numberOfLines={1}>{activeVoice?.label ?? ks.chooseVoice}</Text>
+          </Pressable>
+        </View>
       </View>
 
       {configQuery.isError ? (
@@ -328,14 +391,12 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) =>
             item.streaming && item.text.length === 0 ? (
-              <View style={styles.typingRow}>
-                <TypingDots />
-              </View>
+              <View style={styles.typingRow}><TypingDots /></View>
             ) : (
               <ChatBubble
                 role={item.role}
                 text={item.text}
-                streaming={item.streaming}
+                attachments={item.attachments}
                 playing={speakingId === item.id}
                 speakLoading={speakLoadingId === item.id}
                 onPlay={
@@ -344,9 +405,7 @@ export default function ChatScreen() {
                         if (speakingId === item.id) {
                           stopPlayback();
                           setSpeakingId(null);
-                        } else {
-                          void speakText(item.text, item.id);
-                        }
+                        } else void speakText(item.text, item.id);
                       }
                     : undefined
                 }
@@ -375,64 +434,73 @@ export default function ChatScreen() {
           ) : null}
           {transcribing ? (
             <View testID="transcribing-banner" style={styles.recBanner}>
-              <ActivityIndicator size="small" color={colors.onBrandTertiary} />
-              <Text style={styles.recBannerTextTrans}>{ks.transcribing}</Text>
+              <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+              <Text style={styles.recBannerText}>{ks.transcribing}</Text>
             </View>
           ) : null}
+
+          {attachments.length > 0 ? (
+            <View style={styles.attachRow}>
+              {attachments.map((a) => (
+                <View key={a.id} testID={`attachment-chip-${a.id}`} style={styles.attachChip}>
+                  {a.kind === "image" ? (
+                    <Image style={styles.attachThumb} source={{ uri: `${API_URL}${a.url.replace(API_URL, "")}` }} />
+                  ) : (
+                    <Ionicons name="document-text" size={18} color={colors.brandPrimary} />
+                  )}
+                  <Text style={styles.attachName} numberOfLines={1}>{a.name}</Text>
+                  <Pressable testID={`attachment-remove-${a.id}`} onPress={() => setAttachments((p) => p.filter((x) => x.id !== a.id))} hitSlop={8}>
+                    <Ionicons name="close-circle" size={16} color={colors.muted} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           <View style={styles.dockRow}>
+            {features?.attachments ? (
+              <Pressable testID="attach-photo-button" onPress={addPhoto} disabled={attaching} style={({ pressed }) => [styles.toolBtn, pressed && { opacity: 0.7 }]}>
+                <Ionicons name={attaching ? "hourglass-outline" : "image-outline"} size={20} color={colors.muted} />
+              </Pressable>
+            ) : null}
+            {features?.attachments ? (
+              <Pressable testID="attach-doc-button" onPress={addDocument} disabled={attaching} style={({ pressed }) => [styles.toolBtn, pressed && { opacity: 0.7 }]}>
+                <Ionicons name="document-attach-outline" size={20} color={colors.muted} />
+              </Pressable>
+            ) : null}
             <TextInput
               testID="chat-input"
-              style={styles.input}
+              style={[styles.input, { textAlign: isRtl ? "right" : "left", writingDirection: isRtl ? "rtl" : "ltr" }]}
               value={input}
               onChangeText={setInput}
-              placeholder={ks.typeMessage}
+              placeholder={isRtl ? ks.typeMessage : "Type a message…"}
               placeholderTextColor={colors.muted}
               multiline
               onSubmitEditing={() => sendMessage(input)}
             />
-            <Pressable
-              testID="mic-button"
-              onPress={onMicPress}
-              style={({ pressed }) => [styles.micBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Animated.View style={[styles.micBtnInner, recState.isRecording ? pulseStyle : null]}>
-                <Ionicons name={recordingNow ? "stop" : "mic"} size={22} color={colors.onBrandPrimary} />
-              </Animated.View>
-            </Pressable>
-            {input.trim().length > 0 ? (
-              <Pressable
-                testID="send-button"
-                onPress={() => sendMessage(input)}
-                disabled={sending}
-                style={({ pressed }) => [styles.sendBtn, sending && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
-              >
+            {canSend && !sending ? (
+              <Pressable testID="send-button" onPress={() => sendMessage(input)} style={({ pressed }) => [styles.sendBtn, pressed && { opacity: 0.85 }]}>
                 <Ionicons name="arrow-up" size={20} color={colors.onBrandPrimary} />
               </Pressable>
-            ) : null}
+            ) : sending ? (
+              <View testID="sending-indicator" style={styles.sendBtn}><ActivityIndicator size="small" color={colors.onBrandPrimary} /></View>
+            ) : (
+              <Pressable testID="mic-button" onPress={onMicPress} style={({ pressed }) => [styles.micBtn, pressed && { opacity: 0.85 }]}>
+                <Animated.View style={[styles.micBtnInner, recState.isRecording ? pulseStyle : null]}>
+                  <Ionicons name={recordingNow ? "stop" : "mic"} size={22} color={colors.onBrandPrimary} />
+                </Animated.View>
+              </Pressable>
+            )}
           </View>
+
+          {features?.input_switcher ? (
+            <Pressable testID="script-switch-button" onPress={cycleScript} style={styles.scriptSwitch}>
+              <Ionicons name="language-outline" size={13} color={colors.muted} />
+              <Text style={styles.scriptSwitchText}>{ks.inputScript}: {SCRIPT_LABEL[script]}</Text>
+            </Pressable>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
-
-      <View style={[styles.topRight, { top: insets.top + spacing.xs }]}>
-        <Pressable
-          testID="clear-chat-button"
-          onPress={clearChat}
-          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
-        >
-          <Ionicons name="trash-outline" size={18} color={colors.muted} />
-        </Pressable>
-        <Pressable
-          testID="voice-picker-button"
-          onPress={() => sheetRef.current?.present()}
-          style={({ pressed }) => [styles.voiceChip, pressed && { opacity: 0.85 }]}
-        >
-          <Ionicons name="musical-notes" size={16} color={colors.brandPrimary} />
-          <Text style={styles.voiceChipText} numberOfLines={1}>
-            {activeVoice?.label ?? ks.chooseVoice}
-          </Text>
-          <Ionicons name="chevron-down" size={14} color={colors.onSurfaceTertiary} />
-        </Pressable>
-      </View>
 
       <VoicePicker
         sheetRef={sheetRef}
@@ -448,6 +516,20 @@ export default function ChatScreen() {
         }}
       />
 
+      <MenuSheet
+        ref={menuRef}
+        activeConversationId={conversationId}
+        onSelectConversation={(id) => {
+          setConversationId(id);
+          menuRef.current?.dismiss();
+        }}
+        onNewChat={(id) => {
+          setConversationId(id);
+          setMessages([]);
+          menuRef.current?.dismiss();
+        }}
+      />
+
       <PasswordModal
         visible={passwordOpen}
         onClose={() => setPasswordOpen(false)}
@@ -457,14 +539,8 @@ export default function ChatScreen() {
         }}
       />
 
-      <MicPermissionModal
-        visible={permVisible}
-        mode={permMode}
-        onRequest={requestMicPermission}
-        onClose={() => setPermVisible(false)}
-      />
-
-      <Toast message={toastMsg} onDone={() => setToastMsg(null)} />
+      <MicPermissionModal visible={permVisible} mode={permMode} onRequest={requestMicPermission} onClose={() => setPermVisible(false)} />
+      <Toast message={toastMsg} onDone={() => setToastMsg(null)} style={{ top: insets.top + 60 }} />
     </View>
   );
 }
@@ -478,17 +554,12 @@ const useStyles = makeStyles((colors) => ({
     backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
-  },
-  topRight: {
-    position: "absolute",
-    right: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
     gap: spacing.sm,
   },
-  iconBtn: {
-    width: 40,
-    height: 40,
+  headerActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.sm },
+  actionChip: {
+    width: 36,
+    height: 36,
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
@@ -498,25 +569,18 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
-    height: 40,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
+    height: 36,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.pill,
     backgroundColor: colors.brandTertiary,
-    maxWidth: 150,
+    maxWidth: 160,
   },
-  voiceChipText: { color: colors.onBrandTertiary, fontSize: 13, fontWeight: "600", flexShrink: 1 },
+  voiceChipText: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "600", flexShrink: 1 },
   listContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, flexGrow: 1 },
   typingRow: { alignItems: "flex-start" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 80 },
   emptyLogo: { width: 120, height: 120, borderRadius: radius.lg, marginBottom: spacing.lg },
-  emptyTitle: {
-    color: colors.onSurface,
-    fontSize: 20,
-    fontWeight: "700",
-    textAlign: "center",
-    writingDirection: "rtl",
-  },
+  emptyTitle: { color: colors.onSurface, fontSize: 20, fontWeight: "700", textAlign: "center", writingDirection: "rtl" },
   emptyHint: {
     color: colors.muted,
     fontSize: 14,
@@ -534,6 +598,7 @@ const useStyles = makeStyles((colors) => ({
     paddingTop: spacing.sm,
   },
   dockRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
+  toolBtn: { width: 40, height: 44, alignItems: "center", justifyContent: "center" },
   input: {
     flex: 1,
     minHeight: 44,
@@ -544,32 +609,25 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     fontSize: 15,
-    textAlign: "right",
-    writingDirection: "rtl",
   },
-  micBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandPrimary,
+  micBtn: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  micBtnInner: { width: 48, height: 48, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
+  sendBtn: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  attachRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.sm },
+  attachChip: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    maxWidth: 180,
   },
-  micBtnInner: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sendBtn: {
-    width: 44,
-    height: 48,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSecondary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  attachThumb: { width: 28, height: 28, borderRadius: radius.sm },
+  attachName: { color: colors.onSurfaceSecondary, fontSize: 12, flexShrink: 1 },
+  scriptSwitch: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs, marginTop: spacing.sm },
+  scriptSwitchText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
   recBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -582,7 +640,6 @@ const useStyles = makeStyles((colors) => ({
     minHeight: 36,
   },
   recBannerText: { color: colors.onBrandPrimary, fontSize: 13, fontWeight: "600", writingDirection: "rtl", textAlign: "right" },
-  recBannerTextTrans: { color: colors.brandSecondary, fontSize: 13, writingDirection: "rtl", textAlign: "right" },
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",

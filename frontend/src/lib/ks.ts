@@ -75,6 +75,59 @@ export const ks = {
   playVoice: "آواز سُنِو",
   stopVoice: "آواز رَاوِ",
   newChatVoice: "نئیٚ آواز",
+
+  // auth + history
+  signIn: "گوگل سٕتؠ سائن اِن",
+  signOut: "سائن آوٹ",
+  guest: "مہمان",
+  guestMode: "مہمان طور اِستٕعمال کٔریو",
+  historyTitle: "گٲپھ ہِسٹری",
+  newChat: "نۆو گٲپھ",
+  noHistory: "وُنہِ کہین گٲپھ چھُ نہٕ",
+  signInForHistory: "ہِسٹری بچاوُن خأطرٕ سائن اِن کٔریو",
+  deleteChat: "گٲپھ مِٹٲیو",
+  menu: "مینو",
+  account: "اکاؤنٹ",
+
+  // voice conversation box
+  voiceMode: "آواز موڈ",
+  tapToSpeak: "وُنُن خأطرٕ دبٲیو",
+  listening: "بوزان چھُس…",
+  speaking: "وُنان چھُس…",
+  processing: "سۆچان چھُس…",
+  endVoice: "بند کٔریو",
+  voiceHint: "دبٲیو تہٕ کٲشُر منز وُنِو",
+
+  // attachments
+  attach: "فایل جوڑیو",
+  attachPhoto: "فوٹو",
+  attachPdf: "PDF / فایل",
+  attaching: "اپلوڈ گژھأن چھُ…",
+  removeAttachment: "ہٹٲیو",
+
+  // input script
+  inputScript: "لِکھنُک سِکرِپٹ",
+  scriptPerso: "کٲشُر / اردو",
+  scriptEnglish: "English",
+  scriptUrdu: "اردو",
+
+  // dev customization
+  customizeTitle: "اٮ۪پ ڈِزائن",
+  appNameLabel: "اٮ۪پ ناو",
+  taglineLabel: "ٹیگ لائن",
+  logoPosition: "لوگو جاۍ",
+  posLeft: "کھوفُر",
+  posCenter: "بیچ",
+  posRight: "دٲچھِن",
+  featuresTitle: "فیچرٕ",
+  featVoiceMode: "آواز موڈ",
+  featAttachments: "فایل جوڑُن",
+  featAutoSpeak: "خُودکار آواز",
+  featInputSwitcher: "سِکرِپٹ سویچ",
+  featShowTagline: "ٹیگ لائن ہاوِو",
+  visionModel: "وِژن ماڈل (فایل)",
+  characterPhoto: "کریکٹر فوٹو",
+  changePhoto: "فوٹو بدلٲیو",
 };
 
 export type KS = typeof ks;

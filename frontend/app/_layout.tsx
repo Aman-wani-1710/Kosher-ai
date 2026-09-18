@@ -8,6 +8,7 @@ import { Ionicons } from "@react-native-vector-icons/ionicons";
 
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
+import { AuthProvider } from "@/src/lib/auth";
 
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
@@ -33,15 +34,18 @@ export default function RootLayout() {
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <QueryClientProvider client={queryClient}>
-          <KeyboardProvider>
-            <BottomSheetModalProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="index" />
-                <Stack.Screen name="dev" options={{ presentation: "modal" }} />
-              </Stack>
-              <IconPrewarm />
-            </BottomSheetModalProvider>
-          </KeyboardProvider>
+          <AuthProvider>
+            <KeyboardProvider>
+              <BottomSheetModalProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="voice" options={{ presentation: "fullScreenModal", animation: "fade" }} />
+                  <Stack.Screen name="dev" options={{ presentation: "modal" }} />
+                </Stack>
+                <IconPrewarm />
+              </BottomSheetModalProvider>
+            </KeyboardProvider>
+          </AuthProvider>
         </QueryClientProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>

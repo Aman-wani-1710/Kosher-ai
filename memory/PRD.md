@@ -28,21 +28,24 @@ Build a Chatbot + AI Voice Assistant for the **Kashmiri language**. Modern chat 
 6. Secrets never leave the backend in plaintext.
 
 ## Implemented (2026-06)
-- [x] Backend: `/api/health`, `/api/config`, `/api/chat` (SSE streaming, Kashmiri), `/api/history`, `/api/chat/clear`.
-- [x] Backend: `/api/stt` (Sarvam + Azure), `/api/tts` (Sarvam/Azure/ElevenLabs), `/api/dev/*` (unlock, settings GET/PUT, test-tts, logo upload/reset), `/api/files/logo`.
-- [x] AES-GCM encrypted key storage + masked previews; HMAC dev token auth; provider validation (422s).
-- [x] Frontend chat screen: streaming, typing dots, per-message play button, auto-speak, mic recording w/ permission flow, voice picker bottom sheet, clear chat, toasts, RTL bubbles.
-- [x] Easter-egg logo header (tap counter + haptics) and password modal.
-- [x] Developer dashboard screen with all fields, voice-model editor, provider chip rows, test-voice, logo picker.
-- [x] AI-generated app/splash/adaptive logo.
-- [x] Verified: 17/17 backend tests + frontend flows via testing agent.
+- [x] v1: streaming Kashmiri chat, STT/TTS (Sarvam/Azure/ElevenLabs), voice picker, easter-egg dev dashboard, encrypted keys, AI logo.
+
+## Implemented (v2 upgrades)
+- [x] Google sign-in (Emergent-managed) + guest mode (sign-in optional); token in secure storage, in-memory mirror.
+- [x] Per-user conversations + chat history; tap logo / menu sheet to browse, create, delete chats.
+- [x] Gemini-style attachments: photo + PDF/TXT/CSV upload (object storage), AI reads them and replies in Kashmiri (routes to Gemini vision model).
+- [x] Kashmiri voice-conversation mode (full-screen orb: tap → listen → transcribe → reply → speak) with selectable voice characters.
+- [x] Voice characters with uploadable avatar photos (Developer Options + shown in voice mode).
+- [x] Full layout control in Developer Options: app name, tagline, logo position (left/center/right), feature toggles, vision model.
+- [x] Input-script switcher (Kashmiri/Urdu Perso-Arabic ↔ English) with RTL/LTR + placeholder swap.
+- [x] Verified: 22/22 backend tests + frontend flows via testing agent.
 
 ## Backlog (prioritized)
-- **P1:** Persist per-conversation sessions / multiple chat threads.
-- **P1:** Waveform/level meter while recording.
-- **P2:** Message reactions, copy-to-clipboard, share transcript.
-- **P2:** Streaming TTS (speak as tokens arrive) for lower latency.
-- **P2:** Light/dark theme toggle.
+- **P1:** Streaming TTS (speak as tokens arrive) for lower latency in voice mode.
+- **P1:** Continuous hands-free voice mode (auto re-listen after reply).
+- **P2:** Waveform/level meter while recording; message copy/share.
+- **P2:** Light/dark theme toggle; drag-to-reorder voice models in Developer Options.
 
 ## Next Tasks
-- Await user-provided Sarvam/Azure/ElevenLabs keys to validate real STT/TTS end-to-end on a device.
+- Await user's attachment-UI reference screenshot to refine the attach flow.
+- Await Sarvam/Azure/ElevenLabs keys to validate real STT/TTS + voice mode on a device.

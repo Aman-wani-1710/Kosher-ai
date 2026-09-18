@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View,
@@ -127,6 +128,11 @@ function PasswordGate({ onSuccess }: { onSuccess: (t: string) => void }) {
 // ---------------------------------------------------------------------------
 
 type FormState = {
+  app_name: string;
+  tagline: string;
+  logo_position: "left" | "center" | "right";
+  vision_model: string;
+  features: import("@/src/lib/api").Features;
   llm_model: string;
   system_prompt: string;
   stt_provider: string;
@@ -157,6 +163,11 @@ function Dashboard({ token }: { token: string }) {
   useEffect(() => {
     if (data && !form) {
       setForm({
+        app_name: data.app_name,
+        tagline: data.tagline,
+        logo_position: data.logo_position,
+        vision_model: data.vision_model,
+        features: data.features,
         llm_model: data.llm_model,
         system_prompt: data.system_prompt,
         stt_provider: data.stt_provider,
@@ -191,6 +202,11 @@ function Dashboard({ token }: { token: string }) {
       await apiPut<DevSettings>(
         "/dev/settings",
         {
+          app_name: form!.app_name,
+          tagline: form!.tagline,
+          logo_position: form!.logo_position,
+          vision_model: form!.vision_model,
+          features: form!.features,
           llm_model: form!.llm_model,
           system_prompt: form!.system_prompt,
           stt_provider: form!.stt_provider,
@@ -262,6 +278,29 @@ function Dashboard({ token }: { token: string }) {
     } finally {
       setTestingId(null);
     }
+  }
+
+  async function uploadVoiceAvatar(vmId: string) {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, allowsEditing: true });
+      if (res.canceled || !res.assets?.[0]) return;
+      const asset = res.assets[0];
+      const file: any =
+        Platform.OS === "web"
+          ? { blob: await (await fetch(asset.uri)).blob(), name: "avatar.png" }
+          : { uri: asset.uri, name: "avatar.png", type: asset.mimeType ?? "image/png" };
+      await apiUpload(`/dev/voice/${vmId}/avatar`, file, token);
+      setLogoTs(Date.now());
+      queryClient.invalidateQueries({ queryKey: ["devSettings"] });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+      showToast(ks.logoUpdated);
+    } catch (e: any) {
+      showToast(e?.detail?.slice(0, 90) || ks.errorGeneric);
+    }
+  }
+
+  function toggleFeature(key: keyof import("@/src/lib/api").Features) {
+    setForm((f) => (f ? { ...f, features: { ...f.features, [key]: !f.features[key] } } : f));
   }
 
   function updateVoice(id: string, patch: Partial<VoiceModel>) {
@@ -344,6 +383,71 @@ function Dashboard({ token }: { token: string }) {
           <Text style={styles.dashTitle}>{ks.passwordTitle}</Text>
         </View>
 
+        {/* Customization */}
+        <Section title={ks.customizeTitle}>
+          <Field label={ks.appNameLabel}>
+            <TextInput
+              testID="dev-app-name-input"
+              style={styles.input}
+              value={form.app_name}
+              onChangeText={(v) => setForm((f) => f && { ...f, app_name: v })}
+            />
+          </Field>
+          <Field label={ks.taglineLabel}>
+            <TextInput
+              testID="dev-tagline-input"
+              style={styles.input}
+              value={form.tagline}
+              onChangeText={(v) => setForm((f) => f && { ...f, tagline: v })}
+            />
+          </Field>
+          <View style={styles.chipWrap}>
+            <Text style={styles.label}>{ks.logoPosition}</Text>
+            <ChipRow
+              testPrefix="logo-pos"
+              options={[
+                { id: "left", label: ks.posLeft },
+                { id: "center", label: ks.posCenter },
+                { id: "right", label: ks.posRight },
+              ]}
+              value={form.logo_position}
+              onChange={(v) => setForm((f) => f && { ...f, logo_position: v as any })}
+            />
+          </View>
+          <Field label={ks.visionModel}>
+            <TextInput
+              testID="dev-vision-model-input"
+              style={styles.inputLtr}
+              value={form.vision_model}
+              onChangeText={(v) => setForm((f) => f && { ...f, vision_model: v })}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </Field>
+        </Section>
+
+        {/* Feature toggles */}
+        <Section title={ks.featuresTitle}>
+          {([
+            ["voice_mode", ks.featVoiceMode],
+            ["attachments", ks.featAttachments],
+            ["auto_speak", ks.featAutoSpeak],
+            ["input_switcher", ks.featInputSwitcher],
+            ["show_tagline", ks.featShowTagline],
+          ] as const).map(([key, label]) => (
+            <View key={key} style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>{label}</Text>
+              <Switch
+                testID={`feature-${key}`}
+                value={form.features[key]}
+                onValueChange={() => toggleFeature(key)}
+                trackColor={{ false: colors.border, true: colors.brandPrimary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          ))}
+        </Section>
+
         {/* LLM */}
         <Section title={ks.llmTitle}>
           <Field label={ks.llmModel}>
@@ -425,6 +529,23 @@ function Dashboard({ token }: { token: string }) {
                     <Ionicons name="trash-outline" size={18} color={colors.error} />
                   </Pressable>
                 </View>
+                <Pressable
+                  testID={`voice-avatar-${vm.id}`}
+                  onPress={() => uploadVoiceAvatar(vm.id)}
+                  style={styles.avatarRow}
+                >
+                  {vm.avatar_url ? (
+                    <Image style={styles.voiceAvatar} source={{ uri: `${apiBaseForImages()}${vm.avatar_url}?ts=${logoTs}` }} />
+                  ) : (
+                    <View style={[styles.voiceAvatar, styles.voiceAvatarEmpty]}>
+                      <Ionicons name="person" size={22} color={colors.muted} />
+                    </View>
+                  )}
+                  <View style={styles.avatarBtn}>
+                    <Ionicons name="camera-outline" size={16} color={colors.brandPrimary} />
+                    <Text style={styles.avatarBtnText}>{ks.characterPhoto}</Text>
+                  </View>
+                </Pressable>
                 <Field label={ks.voiceLabel}>
                   <TextInput
                     testID={`voice-label-${vm.id}`}
@@ -725,6 +846,13 @@ const useStyles = makeStyles((colors) => ({
     gap: spacing.sm,
   },
   voiceCardActive: { borderColor: colors.brandPrimary, borderWidth: 1.5 },
+  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
+  toggleLabel: { color: colors.onSurfaceSecondary, fontSize: 14, fontWeight: "600", writingDirection: "rtl", textAlign: "right", flex: 1 },
+  avatarRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  voiceAvatar: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.surfaceTertiary },
+  voiceAvatarEmpty: { alignItems: "center", justifyContent: "center" },
+  avatarBtn: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  avatarBtnText: { color: colors.brandPrimary, fontSize: 13, fontWeight: "600", writingDirection: "rtl" },
   chipWrap: { gap: spacing.xs },
   testBtn: {
     flexDirection: "row",
