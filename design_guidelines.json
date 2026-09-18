@@ -1,0 +1,123 @@
+{
+  "app_name": "Kosher AI",
+  "personality": "3 Editorial Mobile LIGHT (with warm ceramic & saffron accents)",
+  "personality_one_liner": "An authentic Kashmiri voice assistant blending traditional cultural heritage with modern AI speech technology.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#2C2623",
+    "surfaceSecondary": "#F5EFE6",
+    "onSurfaceSecondary": "#3E3532",
+    "surfaceTertiary": "#EBE3D5",
+    "onSurfaceTertiary": "#4E423E",
+    "surfaceInverse": "#1A1715",
+    "onSurfaceInverse": "#FDFBF7",
+    "brand": "#C85A32",
+    "brandPrimary": "#C85A32",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#A64420",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#FCECE6",
+    "onBrandTertiary": "#C85A32",
+    "success": "#3D7A5D",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D48C33",
+    "onWarning": "#FFFFFF",
+    "error": "#B83A2C",
+    "onError": "#FFFFFF",
+    "info": "#4A6FA5",
+    "onInfo": "#FFFFFF",
+    "border": "#E2D9CE",
+    "borderStrong": "#C85A32",
+    "divider": "#EFE8DF",
+    "muted": "#7A6E65",
+    "onBrand": "#FFFFFF"
+  },
+  "typography": {
+    "displayFontFamily": "PlayfairDisplay_400Regular",
+    "textFontFamily": "PlusJakartaSans_400Regular",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous editorial vertical rhythm, clean padding around chat bubbles and voice controls",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "stack_only",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use frosted glass header and voice action dock over scrolling chat history",
+      "Ensure ≥75% surface tint opacity for full Persian script readability"
+    ],
+    "dont's": [
+      "Never blur form inputs or body text",
+      "Never stack multiple blur views without solid tint backing"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "ChatAssistant",
+      "purpose": "Primary bilingual chat and voice assistant interface with RTL Kashmiri support, voice model switcher, and easter-egg logo tap counter.",
+      "states": {
+        "loading": "Centered saffron spinner with Kashmiri greeting load state",
+        "empty": "Traditional illustrated kangdi icon with prompt in Kashmiri: 'تہٕز کۆمہٕ تروو؟ کٔرِو سوال شۆروٗع' (Start your conversation)",
+        "error": "Readable alert banner with retry button for STT/TTS network connection issues"
+      },
+      "layout": "Sticky top header with app logo (tap counter for developer menu), voice model picker dropdown, and language toggle. Scrollable chat list with RTL Persian script text bubbles. Bottom sticky voice recording dock with prominent microphone button and text input composer."
+    },
+    {
+      "name": "DeveloperOptions",
+      "purpose": "Hidden developer dashboard protected by password 20791 for updating API keys, STT/TTS speech providers (Sarvam AI, Azure, ElevenLabs), system prompts, voice model IDs, and app logo upload.",
+      "states": {
+        "loading": "Loading configuration tokens",
+        "empty": "No custom keys configured yet",
+        "error": "Invalid password warning modal"
+      },
+      "layout": "Secured modal password prompt (20791) leading to a categorized form with secure password inputs for Sarvam, Azure, and ElevenLabs API keys, editable system prompt textarea, voice model ID manager, and image uploader for the Pheran logo."
+    }
+  ],
+  "images": {
+    "app_logo": {
+      "url": "https://images.unsplash.com/photo-1580310965793-4b057cb0c1e7?auto=format&fit=crop&q=80&w=400",
+      "alt": "Traditional Kashmiri man wearing pheran holding kangdi"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Ensure all Kashmiri UI strings are written in Perso-Arabic script with correct RTL alignment (direction: 'rtl').",
+    "Implement the logo tap-counter easter egg (10 taps) that triggers the password modal asking for 20791.",
+    "Build the Hidden Developer Dashboard with secure inputs for Sarvam AI, Azure Speech, and ElevenLabs API keys, system prompt editor, voice model ID manager, and logo uploader.",
+    "Include the voice model picker dropdown allowing selection between Male Voice 1 and Female Voice 1.",
+    "Style using the Editorial Light personality with warm saffron and ceramic terracotta accents, adhering strictly to the 500 font-weight cap and avoiding all banned hues."
+  ]
+}

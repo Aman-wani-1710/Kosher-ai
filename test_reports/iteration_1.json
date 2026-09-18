@@ -1,0 +1,31 @@
+{
+  "summary": "End-to-end verification of Kosher AI (Kashmiri voice assistant). All 17 backend pytest tests pass on the public preview URL: /api/health, /api/config (6 voice_models, sarvam defaults, providers_ready flags, llm_ready=true), /api/chat SSE streaming with multiple delta frames + final done event, reply is in Kashmiri Perso-Arabic script, /api/history returns user+assistant chronologically, /api/chat/clear soft-deletes, /api/dev/unlock wrong=401 / '20791'=200 with token, /api/dev/settings 401 without token / 200 with token / keys masked (configured+preview, never plaintext), PUT applies keys (sarvam_api_key -> providers_ready.sarvam=true, masked preview), validation returns 422 for invalid stt_provider, empty voice_models, and active_voice_model_id not in list, /api/stt (multipart wav) returns 400 'not configured' when key absent, /api/tts returns 400 'not configured' when active voice provider has no key, /api/dev/test-tts returns 400 'not configured' when provider key missing. Frontend smoke-tested via Playwright at mobile viewport (390x844): app loads, chat send + streaming assistant reply in Kashmiri (وعلیکم السلام! تُہۍ کِس حال چھُو؟), voice picker chip visible, mic button visible, clear-chat works, easter egg (11 taps on app-logo-button) opens password modal, wrong password shows dev-password-error, password '20791' unlocks and dev dashboard renders with all testIDs (dev-save-button, dev-llm-model-input, dev-system-prompt-input, dev-key-{sarvam,azure,elevenlabs,openai}_api_key, stt-chip-*, tts-chip-*, add-voice-button, dev-logo-upload-btn, dev-logo-reset-btn). Test data was reset (mongo settings + messages cleared) so defaults are restored. Deprecated packages detected: none — the app already uses expo-audio (not expo-av).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_kosher_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py line 369 re-imports json via `json = __import__('json')` after the module was shadowed earlier — this is a code smell caused by an earlier local variable/param named 'json'. Consider removing the top-level shadowing (e.g. inside the chat stream generator the outer `import json` is fine; the manual re-import is unnecessary and confusing).",
+    "server.py: get_settings() writes to `_id: SETTINGS_ID` on first insert but save_settings() writes to `_id: 'settings'` literally. Both currently resolve to the same string, but consider using the SETTINGS_ID constant in save_settings for consistency.",
+    "server.py DevSettingsView.keys only includes fields in KEY_FIELDS which contains 'azure_region'. But /dev/settings frontend also treats azure_region as a key input via keyInputs (dev.tsx line 386). This is fine but note azure_region is stored encrypted like an API key — acceptable but slightly unusual.",
+    "Frontend api.ts uses global `fetch` for /chat via expo/fetch and native fetch elsewhere; consistent and correct for SSE streaming."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_kosher_backend.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (all critical flows verified)"},
+  "seed_data_creation": "During testing a fake sarvam key ('sk-testFAKE12345678') was written to verify masking and providers_ready flip. Both were cleaned up afterwards: mongo settings doc and messages collection were fully cleared, /api/config now returns defaults (active=female-1, all providers_ready=false, 6 voice_models).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend + frontend both fully working. Use /app/backend/tests/test_kosher_backend.py as regression. Base URL: EXPO_PUBLIC_BACKEND_URL. Dev password: 20791. To reset state, delete mongo 'settings' doc + 'messages' collection; /api/config auto-reseeds defaults. Note: TestSpeechNotConfigured test switches STT provider to azure and active voice to female-azure to force 'not configured' 400s (since Sarvam is the default and, if a real Sarvam key were ever configured, the sarvam path would return 502 instead of 400).",
+  "rca_of_issue": "N/A — no bugs found."
+}
