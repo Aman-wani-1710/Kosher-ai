@@ -32,8 +32,8 @@ import {
   useAudioRecorderState,
 } from "expo-audio";
 
-import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { makeStyles, radius, spacing, useTheme, useThemeMode } from "@/src/theme";
+import { useT, useLang } from "@/src/lib/i18n";
 import {
   API_URL,
   apiGet,
@@ -67,11 +67,6 @@ const DEV_TOKEN_KEY = "dev_token";
 type ListItem = ChatMsg & { streaming?: boolean };
 type Script = "perso" | "urdu" | "english";
 const SCRIPT_ORDER: Script[] = ["perso", "urdu", "english"];
-const SCRIPT_LABEL: Record<Script, string> = {
-  perso: ks.scriptPerso,
-  urdu: ks.scriptUrdu,
-  english: ks.scriptEnglish,
-};
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -79,7 +74,10 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, signInWithGoogle } = useAuth();
+  const t = useT();
+  const { toggle: toggleLang, lang } = useLang();
+  const { mode, toggle: toggleTheme } = useThemeMode();
 
   const [conversationId, setConversationId] = useState("guest");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -98,6 +96,7 @@ export default function ChatScreen() {
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [activeVoiceId, setActiveVoiceId] = useState<string | null>(null);
   const [script, setScript] = useState<Script>("perso");
+  const [generatingImage, setGeneratingImage] = useState(false);
 
   const autoSpeakRef = useRef(true);
   const activeVoiceRef = useRef<string | null>(null);
@@ -163,7 +162,7 @@ export default function ChatScreen() {
       recorder.record();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } catch {
-      showToast(ks.errorGeneric);
+      showToast(t.errorGeneric);
     }
   }
 
@@ -184,7 +183,7 @@ export default function ChatScreen() {
       await startRecording();
     } else if (perm.canAskAgain) {
       setPermVisible(false);
-      showToast(ks.micDeniedToast);
+      showToast(t.micDeniedToast);
     } else setPermMode("blocked");
   }
 
@@ -202,10 +201,10 @@ export default function ChatScreen() {
           : { uri, name: "recording.m4a", type: "audio/m4a" };
       const res = await apiUpload<{ text: string }>("/stt", file);
       const text = (res.text ?? "").trim();
-      if (!text) return showToast(ks.errorGeneric);
+      if (!text) return showToast(t.errorGeneric);
       await sendMessage(text);
     } catch (e: any) {
-      showToast(e?.status === 400 ? ks.keysMissing : ks.errorGeneric);
+      showToast(e?.status === 400 ? t.keysMissing : t.errorGeneric);
     } finally {
       setTranscribing(false);
     }
@@ -246,12 +245,12 @@ export default function ChatScreen() {
               if (autoSpeakRef.current) void speakText(reply.text, reply.id);
             } else if (ev.type === "error") {
               setStreamingText(null);
-              showToast(ev.detail.toLowerCase().includes("key") ? ks.keysMissing : ev.detail.slice(0, 90));
+              showToast(ev.detail.toLowerCase().includes("key") ? t.keysMissing : ev.detail.slice(0, 90));
             }
           },
         );
       } catch {
-        showToast(ks.noNetwork);
+        showToast(t.noNetwork);
       } finally {
         setSending(false);
         setStreamingText(null);
@@ -273,7 +272,7 @@ export default function ChatScreen() {
       setSpeakingId(id);
       await playBase64(res.audio_base64, res.mime, () => setSpeakingId((c) => (c === id ? null : c)));
     } catch (e: any) {
-      showToast(e?.status === 400 ? ks.keysMissing : ks.errorGeneric);
+      showToast(e?.status === 400 ? t.keysMissing : t.errorGeneric);
     } finally {
       setSpeakLoadingId((c) => (c === id ? null : c));
     }
@@ -299,9 +298,9 @@ export default function ChatScreen() {
       await apiPost(`/chat/clear?conversation_id=${conversationId}`);
       setMessages([]);
       queryClient.invalidateQueries({ queryKey: ["history", conversationId] });
-      showToast(ks.cleared);
+      showToast(t.cleared);
     } catch {
-      showToast(ks.noNetwork);
+      showToast(t.noNetwork);
     }
   }
 
@@ -312,7 +311,7 @@ export default function ChatScreen() {
       const a = await pickAndUploadPhoto();
       if (a) setAttachments((p) => [...p, a]);
     } catch (e: any) {
-      showToast(e?.message === "permission" ? ks.micBlockedBody : ks.errorGeneric);
+      showToast(e?.message === "permission" ? t.micBlockedBody : t.errorGeneric);
     } finally {
       setAttaching(false);
     }
@@ -325,9 +324,40 @@ export default function ChatScreen() {
       const a = await pickAndUploadDocument();
       if (a) setAttachments((p) => [...p, a]);
     } catch {
-      showToast(ks.errorGeneric);
+      showToast(t.errorGeneric);
     } finally {
       setAttaching(false);
+    }
+  }
+
+  async function generateImage() {
+    const clean = input.trim();
+    if (!clean || generatingImage || sending) return;
+    Keyboard.dismiss();
+    setGeneratingImage(true);
+    const now = new Date().toISOString();
+    setMessages((m) => [...m, { id: `local-${now}`, role: "user", text: clean, created_at: now }]);
+    setInput("");
+    try {
+      const res = await apiPost<{ message_id: string; attachment: AttachmentMeta }>(
+        "/generate-image",
+        { prompt: clean, conversation_id: conversationId },
+      );
+      setMessages((m) => [
+        ...m,
+        {
+          id: res.message_id,
+          role: "assistant",
+          text: "",
+          attachments: [{ id: res.attachment.id, kind: "image", name: res.attachment.name, mime: res.attachment.mime }],
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      queryClient.invalidateQueries({ queryKey: ["history", conversationId] });
+    } catch (e: any) {
+      showToast(e?.detail?.slice(0, 90) || t.errorGeneric);
+    } finally {
+      setGeneratingImage(false);
     }
   }
 
@@ -345,22 +375,45 @@ export default function ChatScreen() {
   const isRtl = script !== "english";
   const recordingNow = recState.isRecording;
   const canSend = input.trim().length > 0 || attachments.length > 0;
+  const scriptLabel = (s: Script) =>
+    s === "perso" ? t.scriptPerso : s === "urdu" ? t.scriptUrdu : t.scriptEnglish;
 
   return (
     <View style={styles.container}>
       <View style={[styles.headerWrap, { paddingTop: insets.top + spacing.sm }]}>
         <LogoHeader
           source={logo}
-          appName={config?.app_name ?? ks.appName}
-          tagline={config?.tagline ?? ks.tagline}
+          appName={config?.app_name ?? t.appName}
+          tagline={config?.tagline ?? t.tagline}
           showTagline={features?.show_tagline ?? true}
           position={config?.logo_position ?? "left"}
           onEasterEgg={() => setPasswordOpen(true)}
-          onHint={() => showToast(ks.easterHint)}
+          onHint={() => showToast(t.easterHint)}
           onLogoTap={() => menuRef.current?.present()}
           onMenu={() => menuRef.current?.present()}
         />
         <View style={styles.headerActions}>
+          {user ? (
+            <Pressable testID="account-chip" onPress={() => menuRef.current?.present()} style={({ pressed }) => [styles.accountChip, pressed && { opacity: 0.85 }]}>
+              {user.picture ? (
+                <Image style={styles.accountAvatarSm} source={{ uri: user.picture }} />
+              ) : (
+                <Ionicons name="person-circle" size={20} color={colors.brandPrimary} />
+              )}
+              <Text style={styles.accountChipText} numberOfLines={1}>{user.name || user.email}</Text>
+            </Pressable>
+          ) : (
+            <Pressable testID="signin-chip" onPress={signInWithGoogle} style={({ pressed }) => [styles.signinChip, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="log-in-outline" size={16} color={colors.onBrandPrimary} />
+              <Text style={styles.signinChipText} numberOfLines={1}>{t.signIn}</Text>
+            </Pressable>
+          )}
+          <Pressable testID="lang-toggle" onPress={toggleLang} style={({ pressed }) => [styles.actionChip, pressed && { opacity: 0.7 }]}>
+            <Ionicons name="language" size={16} color={colors.brandPrimary} />
+          </Pressable>
+          <Pressable testID="theme-toggle" onPress={toggleTheme} style={({ pressed }) => [styles.actionChip, pressed && { opacity: 0.7 }]}>
+            <Ionicons name={mode === "dark" ? "sunny" : "moon"} size={16} color={colors.brandPrimary} />
+          </Pressable>
           {features?.voice_mode ? (
             <Pressable testID="voice-mode-button" onPress={() => router.push("/voice")} style={({ pressed }) => [styles.actionChip, pressed && { opacity: 0.8 }]}>
               <Ionicons name="mic-circle" size={18} color={colors.brandPrimary} />
@@ -371,7 +424,7 @@ export default function ChatScreen() {
           </Pressable>
           <Pressable testID="voice-picker-button" onPress={() => sheetRef.current?.present()} style={({ pressed }) => [styles.voiceChip, pressed && { opacity: 0.85 }]}>
             <Ionicons name="musical-notes" size={15} color={colors.brandPrimary} />
-            <Text style={styles.voiceChipText} numberOfLines={1}>{activeVoice?.label ?? ks.chooseVoice}</Text>
+            <Text style={styles.voiceChipText} numberOfLines={1}>{activeVoice?.label ?? t.chooseVoice}</Text>
           </Pressable>
         </View>
       </View>
@@ -379,7 +432,7 @@ export default function ChatScreen() {
       {configQuery.isError ? (
         <Pressable testID="config-error-retry" style={styles.errorBanner} onPress={() => configQuery.refetch()}>
           <Ionicons name="cloud-offline-outline" size={14} color={colors.onError} />
-          <Text style={styles.errorBannerText}>{ks.errorBanner}</Text>
+          <Text style={styles.errorBannerText}>{t.errorBanner}</Text>
         </Pressable>
       ) : null}
 
@@ -419,8 +472,8 @@ export default function ChatScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Image style={styles.emptyLogo} source={logo} />
-              <Text style={styles.emptyTitle}>{ks.startChat}</Text>
-              <Text style={styles.emptyHint}>{ks.emptyHint}</Text>
+              <Text style={styles.emptyTitle}>{t.startChat}</Text>
+              <Text style={styles.emptyHint}>{t.emptyHint}</Text>
             </View>
           }
         />
@@ -429,13 +482,19 @@ export default function ChatScreen() {
           {recordingNow ? (
             <View testID="recording-banner" style={styles.recBanner}>
               <Ionicons name="pulse" size={14} color={colors.onBrandPrimary} />
-              <Text style={styles.recBannerText}>{ks.tapAgainToStop}</Text>
+              <Text style={styles.recBannerText}>{t.tapAgainToStop}</Text>
             </View>
           ) : null}
           {transcribing ? (
             <View testID="transcribing-banner" style={styles.recBanner}>
               <ActivityIndicator size="small" color={colors.onBrandPrimary} />
-              <Text style={styles.recBannerText}>{ks.transcribing}</Text>
+              <Text style={styles.recBannerText}>{t.transcribing}</Text>
+            </View>
+          ) : null}
+          {generatingImage ? (
+            <View testID="image-generating-banner" style={styles.recBanner}>
+              <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+              <Text style={styles.recBannerText}>{t.imageGenerating}</Text>
             </View>
           ) : null}
 
@@ -468,12 +527,24 @@ export default function ChatScreen() {
                 <Ionicons name="document-attach-outline" size={20} color={colors.muted} />
               </Pressable>
             ) : null}
+            <Pressable
+              testID="generate-image-button"
+              onPress={generateImage}
+              disabled={generatingImage || !input.trim()}
+              style={({ pressed }) => [styles.toolBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Ionicons
+                name={generatingImage ? "hourglass-outline" : "sparkles-outline"}
+                size={20}
+                color={input.trim() ? colors.brandPrimary : colors.muted}
+              />
+            </Pressable>
             <TextInput
               testID="chat-input"
               style={[styles.input, { textAlign: isRtl ? "right" : "left", writingDirection: isRtl ? "rtl" : "ltr" }]}
               value={input}
               onChangeText={setInput}
-              placeholder={isRtl ? ks.typeMessage : "Type a message…"}
+              placeholder={isRtl ? t.typeMessage : "Type a message…"}
               placeholderTextColor={colors.muted}
               multiline
               onSubmitEditing={() => sendMessage(input)}
@@ -496,7 +567,7 @@ export default function ChatScreen() {
           {features?.input_switcher ? (
             <Pressable testID="script-switch-button" onPress={cycleScript} style={styles.scriptSwitch}>
               <Ionicons name="language-outline" size={13} color={colors.muted} />
-              <Text style={styles.scriptSwitchText}>{ks.inputScript}: {SCRIPT_LABEL[script]}</Text>
+              <Text style={styles.scriptSwitchText}>{t.inputScript}: {scriptLabel(script)}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -556,7 +627,30 @@ const useStyles = makeStyles((colors) => ({
     borderBottomColor: colors.divider,
     gap: spacing.sm,
   },
-  headerActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.sm },
+  headerActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: spacing.sm },
+  accountChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    height: 36,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSecondary,
+    maxWidth: 150,
+  },
+  accountChipText: { color: colors.onSurface, fontSize: 12, fontWeight: "700", flexShrink: 1 },
+  accountAvatarSm: { width: 22, height: 22, borderRadius: radius.pill },
+  signinChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    height: 36,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandPrimary,
+    maxWidth: 170,
+  },
+  signinChipText: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1 },
   actionChip: {
     width: 36,
     height: 36,

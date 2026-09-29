@@ -2,7 +2,7 @@ import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { Image, Pressable, Text, View } from "react-native";
 
 import { API_URL } from "@/src/lib/api";
-import { ks } from "@/src/lib/ks";
+import { useT } from "@/src/lib/i18n";
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 type Attachment = { id: string; kind: string; name: string; mime: string };
@@ -19,6 +19,7 @@ type Props = {
 export function ChatBubble({ role, text, attachments, playing, speakLoading, onPlay }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const t = useT();
   const isUser = role === "user";
 
   return (
@@ -57,7 +58,7 @@ export function ChatBubble({ role, text, attachments, playing, speakLoading, onP
             size={16}
             color={colors.brandPrimary}
           />
-          <Text style={styles.playText}>{speakLoading ? ks.transcribing : playing ? ks.stopVoice : ks.playVoice}</Text>
+          <Text style={styles.playText}>{speakLoading ? t.transcribing : playing ? t.stopVoice : t.playVoice}</Text>
         </Pressable>
       ) : null}
     </View>

@@ -12,7 +12,7 @@ import {
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { useT } from "@/src/lib/i18n";
 import { apiPost } from "@/src/lib/api";
 
 type Props = {
@@ -24,6 +24,7 @@ type Props = {
 export function PasswordModal({ visible, onClose, onSuccess }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const t = useT();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,7 @@ export function PasswordModal({ visible, onClose, onSuccess }: Props) {
       setPassword("");
       onSuccess(res.token);
     } catch {
-      setError(ks.wrongPassword);
+      setError(t.wrongPassword);
     } finally {
       setBusy(false);
     }
@@ -56,8 +57,8 @@ export function PasswordModal({ visible, onClose, onSuccess }: Props) {
           <View style={styles.iconWrap}>
             <Ionicons name="lock-closed" size={22} color={colors.onBrandPrimary} />
           </View>
-          <Text style={styles.title}>{ks.passwordTitle}</Text>
-          <Text style={styles.subtitle}>{ks.passwordSubtitle}</Text>
+          <Text style={styles.title}>{t.passwordTitle}</Text>
+          <Text style={styles.subtitle}>{t.passwordSubtitle}</Text>
           <TextInput
             testID="dev-password-input"
             style={styles.input}
@@ -65,7 +66,7 @@ export function PasswordModal({ visible, onClose, onSuccess }: Props) {
             onChangeText={setPassword}
             secureTextEntry
             keyboardType="number-pad"
-            placeholder={ks.passwordPlaceholder}
+            placeholder={t.passwordPlaceholder}
             placeholderTextColor={colors.muted}
             onSubmitEditing={submit}
             autoFocus
@@ -77,14 +78,14 @@ export function PasswordModal({ visible, onClose, onSuccess }: Props) {
           ) : null}
           <View style={styles.buttons}>
             <Pressable testID="dev-password-cancel-btn" style={styles.secondaryBtn} onPress={onClose}>
-              <Text style={styles.secondaryText}>{ks.cancel}</Text>
+              <Text style={styles.secondaryText}>{t.cancel}</Text>
             </Pressable>
             <Pressable
               testID="dev-password-submit-btn"
               style={({ pressed }) => [styles.primaryBtn, busy && { opacity: 0.6 }, pressed && { opacity: 0.8 }]}
               onPress={submit}
             >
-              <Text style={styles.primaryText}>{busy ? ks.saving : ks.unlock}</Text>
+              <Text style={styles.primaryText}>{busy ? t.saving : t.unlock}</Text>
             </Pressable>
           </View>
         </View>

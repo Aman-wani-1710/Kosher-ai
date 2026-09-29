@@ -128,6 +128,23 @@ export const ks = {
   visionModel: "وِژن ماڈل (فایل)",
   characterPhoto: "کریکٹر فوٹو",
   changePhoto: "فوٹو بدلٲیو",
+
+  // new shared keys (v3)
+  signInApple: "ایپل سٕتؠ سائن اِن",
+  theme: "تھیم",
+  lightMode: "روشن موڈ",
+  darkMode: "کٲلہِ موڈ",
+  languageLabel: "بولی",
+  generateImage: "تصویر بنٲیو",
+  imageGenerating: "تصویر بنأن چھُ…",
+  voiceChanger: "آواز تبدیل (STS)",
+  handsFree: "ہینڈز فری",
+  handsFreeOn: "ہینڈز فری آن",
+  handsFreeOff: "ہینڈز فری بند",
+  aiModel: "اے آی ماڈل",
+  imagePromptHint: "تصویرٕ خٲطرٕ لِکھِو…",
+  sttsKey: "ElevenLabs STS کلید",
+  keyHelpTitle: "کلید کیتھۍ پٲٹھۍ ہٲسِل کریو؟",
 };
 
 export type KS = typeof ks;

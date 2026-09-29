@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.koshuraiassistant.vbehw4"
+      "bundleIdentifier": "com.emergent.koshuraiassistant.vbehw4",
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +26,14 @@
     },
     "plugins": [
       "expo-router",
+      "expo-apple-authentication",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo.png",
+          "color": "#C85A32"
+        }
+      ],
       [
         "expo-splash-screen",
         {

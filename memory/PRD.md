@@ -41,6 +41,24 @@ Build a Chatbot + AI Voice Assistant for the **Kashmiri language**. Modern chat 
 - [x] Developer Options one-tap English ↔ Kashmiri language toggle (persisted).
 - [x] Verified: 22/22 backend tests; Google sign-in reaches Google OAuth; English toggle + script switcher confirmed via screenshots.
 
+## Implemented (v3 upgrades — 2026-06)
+- [x] Emergent-managed OpenAI TTS (gpt-4o-mini-tts, steerable `instructions`) as a new voice provider; default `emergent-female` (coral) + `emergent-male` (onyx). No user key needed.
+- [x] Apple Sign-In: `POST /api/auth/apple` (Apple JWKS verify) alongside Google; native button in menu (iOS). Testable only on a real iOS build.
+- [x] Emergent-managed push notifications plumbing: `/api/register-push`, `send_push()`, dev `/api/dev/push-test` daily reminder; module-scope handlers + registration in `_layout.tsx`. Works only after Publish + build; Android needs `google-services.json`.
+- [x] ElevenLabs Speech-to-Speech (`/api/sts`) voice-changer mode in Voice screen + dedicated STS key field in Dev Options.
+- [x] OpenAI gpt-image-1 image generation in chat (`/api/generate-image`) via the sparkles button.
+- [x] App-wide English ↔ Kashmiri translate toggle (global LanguageContext + `useT()`); globe icon in top bar + menu.
+- [x] Light/Dark theme toggle (ThemeProvider + dark palette); sun/moon icon in top bar + menu.
+- [x] Prominent top-bar sign-in chip (avatar + name when signed in) + Apple button in menu.
+- [x] Hands-free voice mode (auto re-listen after the AI finishes speaking).
+- [x] AI model dropdown in Dev Options: Gemini 3.1 Pro, Gemini 3 Flash, GPT-5.4, Claude Sonnet 4.6.
+- [x] In-app key-help links (Sarvam / Azure / ElevenLabs) in Dev Options.
+- [x] Verified: 13/13 v3 checks pass (backend pytest + frontend). Fixed duplicate system-prompt in `/api/chat`.
+
+### v3 notes / build-only
+- Apple Sign-In and push notifications require a real iOS/Android build (not Expo Go). Android push also needs a Firebase `google-services.json`.
+- OpenAI TTS voices are English-trained, so Kashmiri carries an English accent; ElevenLabs multilingual / Sarvam give a more native accent.
+
 ## Backlog (prioritized)
 - **P1:** Streaming TTS (speak as tokens arrive) for lower latency in voice mode.
 - **P1:** Continuous hands-free voice mode (auto re-listen after reply).

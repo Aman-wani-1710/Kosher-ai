@@ -2,7 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { useT } from "@/src/lib/i18n";
 
 type Props = {
   visible: boolean;
@@ -14,6 +14,7 @@ type Props = {
 export function MicPermissionModal({ visible, mode, onRequest, onClose }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const t = useT();
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -22,14 +23,14 @@ export function MicPermissionModal({ visible, mode, onRequest, onClose }: Props)
           <View style={styles.iconWrap}>
             <Ionicons name="mic" size={22} color={colors.onBrandPrimary} />
           </View>
-          <Text style={styles.title}>{ks.micPermissionTitle}</Text>
-          <Text style={styles.body}>{mode === "blocked" ? ks.micBlockedBody : ks.micPermissionBody}</Text>
+          <Text style={styles.title}>{t.micPermissionTitle}</Text>
+          <Text style={styles.body}>{mode === "blocked" ? t.micBlockedBody : t.micPermissionBody}</Text>
           <Pressable
             testID="mic-permission-allow-btn"
             style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.8 }]}
             onPress={onRequest}
           >
-            <Text style={styles.primaryText}>{ks.micAllow}</Text>
+            <Text style={styles.primaryText}>{t.micAllow}</Text>
           </Pressable>
           {mode === "blocked" ? (
             <Pressable
@@ -41,11 +42,11 @@ export function MicPermissionModal({ visible, mode, onRequest, onClose }: Props)
                 require("react-native").Linking.openSettings();
               }}
             >
-              <Text style={styles.secondaryText}>{ks.openSettings}</Text>
+              <Text style={styles.secondaryText}>{t.openSettings}</Text>
             </Pressable>
           ) : null}
           <Pressable testID="mic-permission-cancel-btn" onPress={onClose} hitSlop={12}>
-            <Text style={styles.cancelText}>{ks.cancel}</Text>
+            <Text style={styles.cancelText}>{t.cancel}</Text>
           </Pressable>
         </View>
       </View>

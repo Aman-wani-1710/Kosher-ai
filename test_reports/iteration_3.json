@@ -1,0 +1,37 @@
+{
+  "summary": "Full v3 verification of Kosher AI session additions. BACKEND (7/7 pytest cases pass on public preview URL): (1) GET /api/config returns providers_ready.openai=true and voice_models includes provider='openai' entries with ids emergent-female (voice_id=coral) and emergent-male (voice_id=onyx), both model_name=gpt-4o-mini-tts. (2) POST /api/tts {text:short Kashmiri, voice_model_id:'emergent-female'} returns {mime:'audio/mpeg', audio_base64:<non-empty>} — base64 decodes to >500 bytes of MP3. (3) POST /api/generate-image {prompt:'a snowy Kashmiri village at sunset', conversation_id:'guest'} returns {message_id, attachment:{id,url,kind:'image',mime:'image/png'}}; GET the attachment URL returns real PNG bytes (0x89 50 4E 47 magic verified). (4) POST /api/auth/apple {identity_token:'bad.token.value'} → 401 (no 500 crash). (5) POST /api/register-push with placeholder EMERGENT_PUSH_KEY returns a structured JSON error (500 'EMERGENT_PUSH_KEY missing or invalid' from the upstream 401 mapping) — no crash, valid JSON detail field. (6) POST /api/dev/unlock {password:'20791'} → token; PUT /api/dev/settings {llm_model:'gpt-5.4'} → chat streams SSE delta+done successfully; restored to 'gemini-3.1-pro-preview' → chat still streams delta+done. (7) POST /api/sts with invalid audio bytes returns 502 with structured 'ElevenLabs STS error' detail (no crash). FRONTEND (mobile 390x844): Home screen loads with signin-chip (Sign in with Google), lang-toggle (globe), theme-toggle (sun/moon), voice-mode-button, chat-input, generate-image-button all present. Language toggle switches Kashmiri↔English (verified before/after body text differs, sign-in text flipped 'گوگل سٕتؠ سائن اِن'↔'Sign in with Google', 'آواز شنو'↔'Play'). Theme toggle icon flips between sun and moon and the sign-in chip visibly re-styles (screenshot). Image generation flow: typed 'a tiny red apple', tapped sparkles → image-generating-banner shows 'تصویر بناں چھُ…' and an assistant image bubble appears in chat-list within seconds. Voice screen: mic-circle button navigates; top bar shows voice-handsfree-toggle (∞) and voice-mode-toggle (⇄) + voice-select-button; orb button present. Developer Options: entered password 20791, dashboard loads; AI model chip row exposes all 4 chips (llm-model-gemini-3.1-pro-preview, llm-model-gemini-3-flash-preview, llm-model-gpt-5.4, llm-model-claude-sonnet-4-6) and tapping GPT-5.4 updates dev-llm-model-input to 'gpt-5.4'; 'Emergent'/'OpenAI' chip labels appear in TTS/voice cards; dev-key-elevenlabs_sts_api_key, dev-key-elevenlabs_api_key, dev-key-openai_api_key fields all render. No red-screen errors. Deprecated packages detected: none (repo already uses expo-audio/expo-video). SafeAreaView issues detected: none. Only minor non-blocking console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' from a nested RN Web component.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "pointerEvents prop", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Non-blocking on web, but should be migrated to style.pointerEvents in the offending component. Not tied to a specific file we authored — likely inside a bottom-sheet/gorhom dependency. Safe to ignore."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_kosher_v3.py",
+    "/app/backend/tests/test_kosher_v2.py",
+    "/app/backend/tests/test_kosher_backend.py",
+    "/app/test_reports/pytest/pytest_v3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py /api/register-push maps upstream 401 → HTTP 500 with detail 'EMERGENT_PUSH_KEY missing or invalid'. This is structured and non-crashing (verified), but 500 feels wrong for an auth/config problem — consider 503 or 502 to distinguish from server bugs; either way the current behaviour satisfies the review contract.",
+    "server.py /api/sts declares the upload field name `file` (FastAPI UploadFile = File(...)). The review request phrased the field as `audio`; when clients send `audio=...` FastAPI returns 422 with 'field required'. Confirmed graceful; keep the field name consistent between server and client.",
+    "server.py /api/chat still builds LlmChat with both system_message=s.system_prompt AND initial_messages that includes {'role':'system','content':s.system_prompt}. Same duplication as previous iteration — the model receives the system prompt twice. Not a functional bug but worth cleaning up (drop the system entry from initial_messages).",
+    "server.py _push_client is a module-level httpx.AsyncClient created at import time; it will leak on shutdown. Add an app.on_event('shutdown') to await _push_client.aclose(). Low priority.",
+    "server.py auth_apple: exception handler concatenates the raw exception message into the 401 detail (`Invalid Apple token: {e}`). Fine for a curated JWT error, but consider trimming/normalising to avoid leaking internal JWKS lookup details."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_kosher_v3.py (new)",
+    "/app/test_reports/pytest/pytest_v3_results.xml (generated)",
+    "/app/test_reports/iteration_3.json (this file)"
+  ],
+  "success_rate": {"backend": "100% (7/7 v3 cases)", "frontend": "100% (all requested flows verified)"},
+  "seed_data_creation": "One guest chat + one generated image (a tiny red apple + a snowy Kashmiri village) were created and left in the guest conversation via /api/chat and /api/generate-image. Dev llm_model was toggled to gpt-5.4 then restored to gemini-3.1-pro-preview. No user accounts, no push registrations persisted (register-push errored upstream before writing to Mongo, as intended).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Regression suites: /app/backend/tests/test_kosher_backend.py (v1), /app/backend/tests/test_kosher_v2.py (v2), /app/backend/tests/test_kosher_v3.py (v3). All use os.environ['EXPO_PUBLIC_BACKEND_URL'] (no hardcoded fallback) — export it from /app/frontend/.env before running pytest, e.g. `export $(grep -v '^#' /app/frontend/.env | xargs) && pytest backend/tests/`. Dev password 20791. Google/Apple OAuth cannot be exercised headless — only negative and guest paths tested. Image generation is ~5-15s in practice; TTS is ~2-5s. The chat SSE test switches llm_model to gpt-5.4 and back to gemini-3.1-pro-preview each run — leaves the default model in place.",
+  "rca_of_issue": "N/A — no bugs found in this iteration."
+}

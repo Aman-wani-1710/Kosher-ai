@@ -1,5 +1,6 @@
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
@@ -14,6 +15,7 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -21,6 +23,7 @@ const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
   signInWithGoogle: async () => {},
+  signInWithApple: async () => {},
   signOut: async () => {},
 });
 
@@ -157,8 +160,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const signInWithApple = useCallback(async () => {
+    try {
+      const cred = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!cred.identityToken) return;
+      const name = cred.fullName
+        ? [cred.fullName.givenName, cred.fullName.familyName].filter(Boolean).join(" ")
+        : undefined;
+      const res = await apiPost<{ session_token: string; user: AuthUser }>("/auth/apple", {
+        identity_token: cred.identityToken,
+        name: name || undefined,
+        email: cred.email || undefined,
+      });
+      await persistToken(res.session_token);
+      setUser(res.user);
+    } catch (e: any) {
+      if (e?.code === "ERR_REQUEST_CANCELED") return; // user cancelled — stay guest
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithApple, signOut }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { useQuery } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo-audio";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { useT } from "@/src/lib/i18n";
 import { API_URL, apiGet, apiPost, apiUpload, streamChat, type AppConfig, type VoiceModel } from "@/src/lib/api";
 import { playBase64, stopPlayback } from "@/src/lib/player";
 import { storage } from "@/src/utils/storage";
@@ -17,6 +17,7 @@ import { Toast } from "@/src/components/toast";
 import { MicPermissionModal } from "@/src/components/mic-permission-modal";
 
 const ACTIVE_VOICE_KEY = "active_voice_model_id";
+const HANDS_FREE_KEY = "voice_hands_free";
 type Phase = "idle" | "listening" | "processing" | "speaking";
 
 export default function VoiceScreen() {
@@ -24,6 +25,7 @@ export default function VoiceScreen() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const t = useT();
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [lastUser, setLastUser] = useState("");
@@ -33,11 +35,20 @@ export default function VoiceScreen() {
   const [permMode, setPermMode] = useState<"explain" | "blocked">("explain");
   const [activeVoiceId, setActiveVoiceId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
+  const [mode, setMode] = useState<"assistant" | "sts">("assistant");
+  const handsFreeRef = useRef(false);
 
   const config = useQuery({ queryKey: ["config"], queryFn: () => apiGet<AppConfig>("/config") }).data;
 
   useEffect(() => {
     storage.getItem(ACTIVE_VOICE_KEY, "").then((id) => id && setActiveVoiceId(id));
+    storage.getItem(HANDS_FREE_KEY, false).then((v) => {
+      if (v) {
+        setHandsFree(true);
+        handsFreeRef.current = true;
+      }
+    });
   }, []);
 
   const activeVoice = useMemo(() => {
@@ -73,7 +84,7 @@ export default function VoiceScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       setPhase("listening");
     } catch {
-      showToast(ks.errorGeneric);
+      showToast(t.errorGeneric);
     }
   }
 
@@ -87,6 +98,16 @@ export default function VoiceScreen() {
     } else setPermMode("blocked");
   }
 
+  const onSpeakEnd = useCallback(() => {
+    setPhase("idle");
+    if (handsFreeRef.current) {
+      setTimeout(() => {
+        if (handsFreeRef.current) void beginListening();
+      }, 700);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function stopAndRun() {
     setPhase("processing");
     try {
@@ -94,6 +115,30 @@ export default function VoiceScreen() {
       await setAudioModeAsync({ allowsRecording: false });
       const uri = recorder.uri;
       if (!uri) throw new Error("no rec");
+
+      if (mode === "sts") {
+        // Speech-to-Speech: re-voice the user's own words in the chosen character voice.
+        const form = new FormData();
+        if (Platform.OS === "web") {
+          const blob = await (await fetch(uri)).blob();
+          form.append("file", blob, "rec.wav");
+        } else {
+          form.append("file", { uri, name: "rec.m4a", type: "audio/m4a" } as any);
+        }
+        form.append("voice_model_id", activeVoice?.id ?? "");
+        const res = await fetch(`${API_URL}/sts`, { method: "POST", body: form });
+        if (!res.ok) {
+          setPhase("idle");
+          return showToast(res.status === 400 ? t.keysMissing : t.errorGeneric);
+        }
+        const data = await res.json();
+        setLastUser(t.voiceChanger);
+        setLastReply("");
+        setPhase("speaking");
+        await playBase64(data.audio_base64, data.mime, onSpeakEnd);
+        return;
+      }
+
       const file: any = Platform.OS === "web"
         ? { blob: await (await fetch(uri)).blob(), name: "rec.wav" }
         : { uri, name: "rec.m4a", type: "audio/m4a" };
@@ -101,14 +146,14 @@ export default function VoiceScreen() {
       const text = (stt.text ?? "").trim();
       if (!text) {
         setPhase("idle");
-        return showToast(ks.errorGeneric);
+        return showToast(t.errorGeneric);
       }
       setLastUser(text);
       let reply = "";
       await streamChat({ text, conversation_id: "voice" }, (ev) => {
         if (ev.type === "delta") { reply += ev.content; setLastReply(reply); }
         else if (ev.type === "done") reply = ev.reply;
-        else if (ev.type === "error") showToast(ev.detail.toLowerCase().includes("key") ? ks.keysMissing : ev.detail.slice(0, 80));
+        else if (ev.type === "error") showToast(ev.detail.toLowerCase().includes("key") ? t.keysMissing : ev.detail.slice(0, 80));
       });
       if (!reply.trim()) {
         setPhase("idle");
@@ -120,11 +165,20 @@ export default function VoiceScreen() {
         text: reply,
         voice_model_id: activeVoice?.id,
       });
-      await playBase64(tts.audio_base64, tts.mime, () => setPhase("idle"));
+      await playBase64(tts.audio_base64, tts.mime, onSpeakEnd);
     } catch (e: any) {
-      showToast(e?.status === 400 ? ks.keysMissing : ks.errorGeneric);
+      showToast(e?.status === 400 ? t.keysMissing : t.errorGeneric);
       setPhase("idle");
     }
+  }
+
+  function toggleHandsFree() {
+    setHandsFree((v) => {
+      const next = !v;
+      handsFreeRef.current = next;
+      void storage.setItem(HANDS_FREE_KEY, next);
+      return next;
+    });
   }
 
   function onOrbPress() {
@@ -136,7 +190,7 @@ export default function VoiceScreen() {
     }
   }
 
-  const statusText = phase === "listening" ? ks.listening : phase === "processing" ? ks.processing : phase === "speaking" ? ks.speaking : ks.voiceHint;
+  const statusText = phase === "listening" ? t.listening : phase === "processing" ? t.processing : phase === "speaking" ? t.speaking : t.voiceHint;
 
   const avatarUrl = activeVoice?.avatar_url ? { uri: `${API_URL}${activeVoice.avatar_url}` } : null;
 
@@ -146,11 +200,19 @@ export default function VoiceScreen() {
         <Pressable testID="voice-close-button" onPress={() => { stopPlayback(); router.back(); }} style={styles.closeBtn}>
           <Ionicons name="chevron-down" size={26} color={colors.onSurface} />
         </Pressable>
-        <Pressable testID="voice-select-button" onPress={() => setPickerOpen((v) => !v)} style={styles.voiceSel}>
-          <Ionicons name={activeVoice?.gender === "male" ? "man" : "woman"} size={16} color={colors.brandPrimary} />
-          <Text style={styles.voiceSelText} numberOfLines={1}>{activeVoice?.label ?? ks.chooseVoice}</Text>
-          <Ionicons name="chevron-down" size={14} color={colors.muted} />
-        </Pressable>
+        <View style={styles.topRight}>
+          <Pressable testID="voice-handsfree-toggle" onPress={toggleHandsFree} style={[styles.toggleBtn, handsFree && styles.toggleBtnOn]}>
+            <Ionicons name="infinite" size={16} color={handsFree ? colors.onBrandPrimary : colors.onSurface} />
+          </Pressable>
+          <Pressable testID="voice-mode-toggle" onPress={() => setMode((m) => (m === "sts" ? "assistant" : "sts"))} style={[styles.toggleBtn, mode === "sts" && styles.toggleBtnOn]}>
+            <Ionicons name="swap-horizontal" size={16} color={mode === "sts" ? colors.onBrandPrimary : colors.onSurface} />
+          </Pressable>
+          <Pressable testID="voice-select-button" onPress={() => setPickerOpen((v) => !v)} style={styles.voiceSel}>
+            <Ionicons name={activeVoice?.gender === "male" ? "man" : "woman"} size={16} color={colors.brandPrimary} />
+            <Text style={styles.voiceSelText} numberOfLines={1}>{activeVoice?.label ?? t.chooseVoice}</Text>
+            <Ionicons name="chevron-down" size={14} color={colors.muted} />
+          </Pressable>
+        </View>
       </View>
 
       {pickerOpen ? (
@@ -208,6 +270,9 @@ const useStyles = makeStyles((colors) => ({
   container: { flex: 1, backgroundColor: colors.surfaceInverse },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   closeBtn: { width: 40, height: 40, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  topRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  toggleBtn: { width: 40, height: 40, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  toggleBtnOn: { backgroundColor: colors.brandPrimary },
   voiceSel: { flexDirection: "row", alignItems: "center", gap: spacing.xs, height: 40, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surface, maxWidth: 200 },
   voiceSelText: { color: colors.onSurface, fontSize: 13, fontWeight: "600", flexShrink: 1 },
   charList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, justifyContent: "center" },

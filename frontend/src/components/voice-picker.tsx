@@ -4,7 +4,7 @@ import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import type { BottomSheetModal as BSM } from "@gorhom/bottom-sheet";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { useT } from "@/src/lib/i18n";
 import { PROVIDER_NAMES, type VoiceModel } from "@/src/lib/api";
 
 type Props = {
@@ -19,6 +19,7 @@ type Props = {
 export function VoicePicker({ sheetRef, voices, activeId, onSelect, autoSpeak, onToggleAutoSpeak }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const t = useT();
   const snapPoints = [Math.min(voices.length * 72 + 190, 600), 600];
 
   return (
@@ -30,7 +31,7 @@ export function VoicePicker({ sheetRef, voices, activeId, onSelect, autoSpeak, o
       enableDynamicSizing={false}
     >
       <View style={styles.container}>
-        <Text style={styles.title}>{ks.chooseVoice}</Text>
+        <Text style={styles.title}>{t.chooseVoice}</Text>
         <FlatList
           data={voices}
           keyExtractor={(v) => v.id}
@@ -62,7 +63,7 @@ export function VoicePicker({ sheetRef, voices, activeId, onSelect, autoSpeak, o
           showsVerticalScrollIndicator={false}
         />
         <View style={styles.autoRow}>
-          <Text style={styles.autoText}>{ks.autospeak}</Text>
+          <Text style={styles.autoText}>{t.autospeak}</Text>
           <Switch
             testID="autospeak-switch"
             value={autoSpeak}

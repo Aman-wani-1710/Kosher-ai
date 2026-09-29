@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -18,7 +19,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
 import { ks } from "@/src/lib/ks";
-import { devStrings, type DevLang } from "@/src/lib/en";
+import { devStrings } from "@/src/lib/en";
+import { useLang } from "@/src/lib/i18n";
 import {
   apiGet,
   apiPost,
@@ -148,18 +150,8 @@ function Dashboard({ token }: { token: string }) {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
 
-  const [lang, setLang] = useState<DevLang>("ks");
-  const ks = devStrings(lang); // shadow module ks with the chosen language
-
-  useEffect(() => {
-    storage.getItem<DevLang>("dev_lang", "ks").then((v) => v && setLang(v));
-  }, []);
-
-  const toggleLang = () => {
-    const next: DevLang = lang === "en" ? "ks" : "en";
-    setLang(next);
-    void storage.setItem("dev_lang", next);
-  };
+  const { lang, toggle: toggleLang } = useLang();
+  const ks = devStrings(lang); // localized strings for the chosen language
 
   const settingsQuery = useQuery({
     queryKey: ["devSettings"],
@@ -468,6 +460,20 @@ function Dashboard({ token }: { token: string }) {
 
         {/* LLM */}
         <Section title={ks.llmTitle}>
+          <View style={styles.chipWrap}>
+            <Text style={styles.label}>{ks.aiModel}</Text>
+            <ChipRow
+              testPrefix="llm-model"
+              options={[
+                { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+                { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
+                { id: "gpt-5.4", label: "GPT-5.4" },
+                { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+              ]}
+              value={form.llm_model}
+              onChange={(v) => setForm((f) => f && { ...f, llm_model: v })}
+            />
+          </View>
           <Field label={ks.llmModel}>
             <TextInput
               testID="dev-llm-model-input"
@@ -513,17 +519,28 @@ function Dashboard({ token }: { token: string }) {
               autoCorrect={false}
             />
           </Field>
+          <Text style={styles.help}>{ks.keyHelpTitle}</Text>
+          <Pressable onPress={() => Linking.openURL("https://dashboard.sarvam.ai/")}>
+            <Text style={styles.helpLink}>🔗 Sarvam → dashboard.sarvam.ai</Text>
+          </Pressable>
+          <Pressable onPress={() => Linking.openURL("https://portal.azure.com/")}>
+            <Text style={styles.helpLink}>🔗 Azure Speech → portal.azure.com</Text>
+          </Pressable>
         </Section>
 
         {/* TTS default provider */}
         <Section title={ks.ttsTitle}>
           <ChipRow
             testPrefix="tts-chip"
-            options={["sarvam", "azure", "elevenlabs"]}
+            options={["sarvam", "azure", "elevenlabs", "openai"]}
             value={form.tts_provider}
             onChange={(v) => setForm((f) => f && { ...f, tts_provider: v })}
           />
           {keyField("elevenlabs_api_key", ks.elevenKey)}
+          {keyField("elevenlabs_sts_api_key", ks.sttsKey)}
+          <Pressable onPress={() => Linking.openURL("https://elevenlabs.io/app/settings/api-keys")}>
+            <Text style={styles.helpLink}>🔗 ElevenLabs → elevenlabs.io/app/settings/api-keys</Text>
+          </Pressable>
         </Section>
 
         {/* Voice models */}
@@ -602,6 +619,20 @@ function Dashboard({ token }: { token: string }) {
                     autoCorrect={false}
                   />
                 </Field>
+                {vm.provider === "openai" ? (
+                  <Field label={ks.systemPrompt}>
+                    <TextInput
+                      testID={`voice-instructions-${vm.id}`}
+                      style={[styles.inputLtr, { minHeight: 60 }]}
+                      value={vm.instructions ?? ""}
+                      onChangeText={(v) => updateVoice(vm.id, { instructions: v })}
+                      multiline
+                      textAlignVertical="top"
+                      placeholder="Speak warmly and slowly, like a gentle Kashmiri friend"
+                      placeholderTextColor={colors.muted}
+                    />
+                  </Field>
+                ) : null}
                 <View style={styles.chipWrap}>
                   <Text style={styles.label}>{ks.gender}</Text>
                   <ChipRow
@@ -618,7 +649,7 @@ function Dashboard({ token }: { token: string }) {
                   <Text style={styles.label}>{ks.provider}</Text>
                   <ChipRow
                     testPrefix={`voice-provider-${vm.id}`}
-                    options={["sarvam", "azure", "elevenlabs"]}
+                    options={["sarvam", "azure", "elevenlabs", "openai"]}
                     value={vm.provider}
                     onChange={(v) => updateVoice(vm.id, { provider: v })}
                   />
@@ -832,6 +863,8 @@ const useStyles = makeStyles((colors) => ({
     writingDirection: "rtl",
   },
   label: { color: colors.onSurfaceSecondary, fontSize: 13, fontWeight: "600", writingDirection: "rtl", textAlign: "right" },
+  help: { color: colors.onSurfaceSecondary, fontSize: 12, fontWeight: "700", marginTop: spacing.sm, writingDirection: "rtl", textAlign: "right" },
+  helpLink: { color: colors.info, fontSize: 12, marginTop: spacing.xs, textAlign: "left" },
   fieldWrap: { gap: spacing.xs },
   labelWrap: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   keyState: { flexDirection: "row", alignItems: "center", gap: spacing.xs },

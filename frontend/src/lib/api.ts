@@ -159,6 +159,7 @@ export type VoiceModel = {
   voice_id: string;
   language_code: string;
   model_name: string;
+  instructions?: string | null;
   avatar_path?: string | null;
   avatar_url?: string | null;
 };
@@ -234,6 +235,7 @@ export const PROVIDER_NAMES: Record<string, string> = {
   sarvam: "Sarvam AI",
   azure: "Azure",
   elevenlabs: "ElevenLabs",
+  openai: "Emergent (OpenAI)",
 };
 
 export function logoSource(

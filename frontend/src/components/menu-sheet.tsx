@@ -1,12 +1,13 @@
 import { forwardRef } from "react";
-import { ActivityIndicator, FlatList, Image, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@react-native-vector-icons/ionicons";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
 import type { BottomSheetModal as BSM } from "@gorhom/bottom-sheet";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { makeStyles, radius, spacing, useTheme } from "@/src/theme";
-import { ks } from "@/src/lib/ks";
+import { makeStyles, radius, spacing, useTheme, useThemeMode } from "@/src/theme";
+import { useT, useLang } from "@/src/lib/i18n";
 import { apiDelete, apiGet, apiPost, type Conversation } from "@/src/lib/api";
 import { useAuth } from "@/src/lib/auth";
 
@@ -22,7 +23,10 @@ export const MenuSheet = forwardRef<BSM, Props>(function MenuSheet(
 ) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const t = useT();
+  const { toggle: toggleLang, lang } = useLang();
+  const { mode, toggle: toggleTheme } = useThemeMode();
+  const { user, loading, signInWithGoogle, signInWithApple, signOut } = useAuth();
   const queryClient = useQueryClient();
 
   const conversations = useQuery({
@@ -74,8 +78,8 @@ export const MenuSheet = forwardRef<BSM, Props>(function MenuSheet(
             </>
           ) : (
             <View style={styles.guestBox}>
-              <Text style={styles.guestTitle}>{ks.guest}</Text>
-              <Text style={styles.guestSub}>{ks.signInForHistory}</Text>
+              <Text style={styles.guestTitle}>{t.guest}</Text>
+              <Text style={styles.guestSub}>{t.signInForHistory}</Text>
               <Pressable
                 testID="sign-in-btn"
                 onPress={signInWithGoogle}
@@ -86,10 +90,32 @@ export const MenuSheet = forwardRef<BSM, Props>(function MenuSheet(
                 ) : (
                   <Ionicons name="logo-google" size={18} color={colors.brandPrimary} />
                 )}
-                <Text style={styles.googleText}>{ks.signIn}</Text>
+                <Text style={styles.googleText}>{t.signIn}</Text>
               </Pressable>
+              {Platform.OS === "ios" ? (
+                <Pressable
+                  testID="apple-sign-in-btn"
+                  onPress={signInWithApple}
+                  style={({ pressed }) => [styles.appleBtn, pressed && { opacity: 0.85 }]}
+                >
+                  <Ionicons name="logo-apple" size={18} color={colors.onSurface} />
+                  <Text style={styles.googleText}>{t.signInApple}</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
+        </View>
+
+        {/* language + theme quick toggles */}
+        <View style={styles.settingsRow}>
+          <Pressable testID="menu-lang-toggle" onPress={toggleLang} style={({ pressed }) => [styles.settingBtn, pressed && { opacity: 0.8 }]}>
+            <Ionicons name="language" size={16} color={colors.brandPrimary} />
+            <Text style={styles.settingText}>{lang === "en" ? "کٲشُر" : "English"}</Text>
+          </Pressable>
+          <Pressable testID="menu-theme-toggle" onPress={toggleTheme} style={({ pressed }) => [styles.settingBtn, pressed && { opacity: 0.8 }]}>
+            <Ionicons name={mode === "dark" ? "sunny" : "moon"} size={16} color={colors.brandPrimary} />
+            <Text style={styles.settingText}>{mode === "dark" ? t.lightMode : t.darkMode}</Text>
+          </Pressable>
         </View>
 
         {/* new chat */}
@@ -99,10 +125,10 @@ export const MenuSheet = forwardRef<BSM, Props>(function MenuSheet(
           style={({ pressed }) => [styles.newChat, pressed && { opacity: 0.85 }]}
         >
           <Ionicons name="add" size={20} color={colors.onBrandPrimary} />
-          <Text style={styles.newChatText}>{ks.newChat}</Text>
+          <Text style={styles.newChatText}>{t.newChat}</Text>
         </Pressable>
 
-        <Text style={styles.historyLabel}>{ks.historyTitle}</Text>
+        <Text style={styles.historyLabel}>{t.historyTitle}</Text>
 
         {user ? (
           <FlatList
@@ -128,11 +154,11 @@ export const MenuSheet = forwardRef<BSM, Props>(function MenuSheet(
                 </View>
               );
             }}
-            ListEmptyComponent={<Text style={styles.empty}>{ks.noHistory}</Text>}
+            ListEmptyComponent={<Text style={styles.empty}>{t.noHistory}</Text>}
             showsVerticalScrollIndicator={false}
           />
         ) : (
-          <Text style={styles.empty}>{ks.signInForHistory}</Text>
+          <Text style={styles.empty}>{t.signInForHistory}</Text>
         )}
       </BottomSheetView>
     </BottomSheetModal>
@@ -173,6 +199,30 @@ const useStyles = makeStyles((colors) => ({
     marginTop: spacing.xs,
   },
   googleText: { color: colors.onSurface, fontSize: 14, fontWeight: "700" },
+  appleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    minHeight: 46,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    marginTop: spacing.sm,
+  },
+  settingsRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  settingBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    minHeight: 40,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary,
+  },
+  settingText: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "700" },
   newChat: {
     flexDirection: "row",
     alignItems: "center",

@@ -21,6 +21,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from xml.sax.saxutils import escape as xml_escape
 
 import httpx
+import jwt
 import requests
 from bson import ObjectId
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -36,6 +37,8 @@ from starlette.concurrency import run_in_threadpool
 from emergentintegrations.llm.chat import (FileContentWithMimeType, ImageContent,
                                            LlmChat, StreamDone, TextDelta,
                                            UserMessage)
+from emergentintegrations.llm.openai import OpenAITextToSpeech
+from emergentintegrations.llm.openai.image_generation import OpenAIImageGeneration
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -46,6 +49,15 @@ DEV_PASSWORD = os.environ["DEV_PASSWORD"]
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 APP_MASTER_KEY = base64.b64decode(os.environ["APP_MASTER_KEY"])
 EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+
+# Apple Sign-In: verify identity tokens against Apple's JWKS.
+APPLE_AUDIENCES = [a.strip() for a in os.environ.get("APPLE_AUDIENCES", "").split(",") if a.strip()]
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_ISSUER = "https://appleid.apple.com"
+
+# Emergent managed push notifications (SuprSend relay).
+EMERGENT_PUSH_BASE_URL = "https://integrations.emergentagent.com"
+EMERGENT_PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -97,22 +109,26 @@ class VoiceModel(BaseModel):
     voice_id: str
     language_code: str = "ks-IN"
     model_name: str = ""
+    instructions: Optional[str] = None  # steering text for gpt-4o-mini-tts (Emergent/OpenAI)
     avatar_path: Optional[str] = None  # object-storage path for the character photo
 
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Kosher AI, a warm and friendly voice assistant for the Kashmiri language.\n"
-    "STRICT RULES:\n"
-    "1. ALWAYS reply only in Kashmiri, written in Perso-Arabic script.\n"
-    "2. Keep every reply short: 1 to 3 short sentences, because replies are spoken aloud "
-    "through text-to-speech.\n"
-    "3. Use a warm, respectful, conversational tone with everyday Kashmiri words.\n"
-    "4. If the user writes in another language, understand it but still reply in Kashmiri.\n"
-    "5. Plain text only: no emoji, no markdown, no bullet points and no romanization, only "
-    "characters that a voice can read aloud.\n"
-    "6. If you do not know something, say so briefly and politely in Kashmiri.\n"
-    "7. If the user attaches a photo or PDF, look at it carefully and answer their question "
-    "about it in Kashmiri."
+    "تُس چھُکھ کوشَر اے آءی، اَکھ گَرٕمجوش تہٕ دوستانہٕ کٲشُر بولی وٲلۍ ؤاژ اسِسٹینٹ۔\n"
+    "You are Kosher AI, a warm Kashmiri-language voice assistant. Follow these rules exactly:\n"
+    "1. Reply ONLY in authentic, natural, everyday spoken Kashmiri (کٲشُر), written in the "
+    "Kashmiri Perso-Arabic script with its correct special characters (ٲ ٳ ٮ ۆ ۄ ؠ etc.).\n"
+    "2. Use REAL Kashmiri words and Kashmiri grammar — do NOT reply in Urdu or Hindi and do "
+    "not just transliterate Urdu into Arabic script. Only borrow an Urdu/English word when "
+    "there is genuinely no common Kashmiri word for it.\n"
+    "3. Keep replies short and conversational: 1-3 short sentences, because they are spoken "
+    "aloud by text-to-speech.\n"
+    "4. Warm, respectful, friendly tone, like a helpful Kashmiri friend.\n"
+    "5. Understand the user even if they write in Urdu, English or Roman Kashmiri, but ALWAYS "
+    "answer in Kashmiri script.\n"
+    "6. Plain text only — no emoji, no markdown, no bullet points, no Roman transliteration.\n"
+    "7. If you attach a photo or PDF, look at it carefully and answer about it in Kashmiri.\n"
+    "8. If you don't know something, say so briefly and politely in Kashmiri."
 )
 
 DEFAULT_VOICE_MODELS: List[VoiceModel] = [
@@ -130,6 +146,10 @@ DEFAULT_VOICE_MODELS: List[VoiceModel] = [
     VoiceModel(id="female-el", label="زَنان آواز ۳", gender="female", provider="elevenlabs",
                voice_id="21m00Tcm4TlvDq8ikWAM", language_code="ks-IN",
                model_name="eleven_multilingual_v2"),
+    VoiceModel(id="emergent-female", label="زَنان آواز (اِمرجنٹ)", gender="female", provider="openai",
+               voice_id="coral", language_code="ks-IN", model_name="gpt-4o-mini-tts"),
+    VoiceModel(id="emergent-male", label="مَرٕد آواز (اِمرجنٹ)", gender="male", provider="openai",
+               voice_id="onyx", language_code="ks-IN", model_name="gpt-4o-mini-tts"),
 ]
 
 DEFAULT_FEATURES = {
@@ -145,7 +165,7 @@ class Settings(BaseDocument):
     app_name: str = "Kosher AI"
     tagline: str = "کٲشُر ؤاژ ایسِسٹینٹ"
     logo_position: str = "left"  # left | center | right
-    llm_model: str = "gpt-5.4"
+    llm_model: str = "gemini-3.1-pro-preview"
     vision_model: str = "gemini-2.5-flash"  # used when attachments are present
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     stt_provider: str = "sarvam"
@@ -193,10 +213,21 @@ class User(BaseModel):
 
 
 SETTINGS_ID = "settings"
-KEY_FIELDS = ["sarvam_api_key", "azure_api_key", "azure_region", "elevenlabs_api_key", "openai_api_key"]
-TTS_PROVIDERS = {"sarvam", "azure", "elevenlabs"}
+KEY_FIELDS = ["sarvam_api_key", "azure_api_key", "azure_region", "elevenlabs_api_key",
+              "elevenlabs_sts_api_key", "openai_api_key"]
+TTS_PROVIDERS = {"sarvam", "azure", "elevenlabs", "openai"}
 STT_PROVIDERS = {"sarvam", "azure"}
 STORAGE_APP = "kosher-ai"
+
+# Optional .env fallbacks for provider keys (used when not set in the dashboard).
+ENV_KEY_FALLBACK = {
+    "sarvam_api_key": "SARVAM_API_KEY",
+    "azure_api_key": "AZURE_API_KEY",
+    "azure_region": "AZURE_REGION",
+    "elevenlabs_api_key": "ELEVENLABS_API_KEY",
+    "elevenlabs_sts_api_key": "ELEVENLABS_STS_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+}
 
 
 async def get_settings() -> Settings:
@@ -221,6 +252,12 @@ async def get_keys() -> Dict[str, Optional[str]]:
             out[name] = _decrypt(env)
         except Exception:
             out[name] = None
+    # Fall back to .env-provided keys when the dashboard has none.
+    for name, env_var in ENV_KEY_FALLBACK.items():
+        if not out.get(name):
+            val = os.environ.get(env_var)
+            if val:
+                out[name] = val.strip()
     return out
 
 
@@ -304,10 +341,28 @@ async def startup():
     try:
         await db.users.create_index("email", unique=True)
         await db.users.create_index("user_id", unique=True)
+        await db.users.create_index("apple_sub", unique=True, sparse=True)
         await db.user_sessions.create_index("session_token", unique=True)
         await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+        await db.push_registrations.create_index("user_id", unique=True)
     except Exception as e:
         logger.warning("index setup failed: %s", e)
+    # Ensure the Emergent (OpenAI) voices exist in an already-persisted settings doc.
+    try:
+        s = await get_settings()
+        if not any(vm.provider == "openai" for vm in s.voice_models):
+            s.voice_models = s.voice_models + [
+                VoiceModel(id="emergent-female", label="زَنان آواز (اِمرجنٹ)", gender="female",
+                           provider="openai", voice_id="coral", language_code="ks-IN",
+                           model_name="gpt-4o-mini-tts"),
+                VoiceModel(id="emergent-male", label="مَرٕد آواز (اِمرجنٹ)", gender="male",
+                           provider="openai", voice_id="onyx", language_code="ks-IN",
+                           model_name="gpt-4o-mini-tts"),
+            ]
+            await save_settings(s)
+            logger.info("added Emergent OpenAI voice models to settings")
+    except Exception as e:
+        logger.warning("voice migration failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +460,123 @@ async def auth_logout(authorization: str = Header(default="")):
 
 
 # ---------------------------------------------------------------------------
+# Apple Sign-In
+# ---------------------------------------------------------------------------
+
+class AppleAuthIn(BaseModel):
+    identity_token: str = Field(min_length=10)
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
+_apple_jwks = jwt.PyJWKClient(APPLE_JWKS_URL)
+
+
+@api_router.post("/auth/apple")
+async def auth_apple(body: AppleAuthIn):
+    if not APPLE_AUDIENCES:
+        raise HTTPException(500, "Apple sign-in is not configured")
+    try:
+        signing_key = await run_in_threadpool(
+            _apple_jwks.get_signing_key_from_jwt, body.identity_token
+        )
+        claims = jwt.decode(
+            body.identity_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=APPLE_AUDIENCES,
+            issuer=APPLE_ISSUER,
+        )
+    except Exception as e:
+        raise HTTPException(401, f"Invalid Apple token: {str(e)[:120]}")
+
+    apple_sub = claims.get("sub")
+    if not apple_sub:
+        raise HTTPException(401, "No subject in Apple token")
+    token_email = (claims.get("email") or body.email or "").lower()
+
+    existing = await db.users.find_one({"apple_sub": apple_sub})
+    if existing:
+        user_id = existing["user_id"]
+    else:
+        byemail = await db.users.find_one({"email": token_email}) if token_email else None
+        if byemail:
+            user_id = byemail["user_id"]
+            await db.users.update_one({"user_id": user_id}, {"$set": {"apple_sub": apple_sub}})
+        else:
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            email = token_email or f"apple-{apple_sub.replace('.', '')[:20]}@appleid.local"
+            await db.users.insert_one({
+                "user_id": user_id,
+                "apple_sub": apple_sub,
+                "email": email,
+                "name": body.name or "",
+                "picture": "",
+                "created_at": datetime.now(timezone.utc),
+            })
+    session_token = secrets.token_urlsafe(32)
+    await db.user_sessions.insert_one({
+        "session_token": session_token,
+        "user_id": user_id,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+    })
+    doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"session_token": session_token, "user": User(**doc).model_dump()}
+
+
+# ---------------------------------------------------------------------------
+# Push notifications (Emergent managed relay)
+# ---------------------------------------------------------------------------
+
+_push_client = httpx.AsyncClient(
+    base_url=EMERGENT_PUSH_BASE_URL,
+    headers={"X-Push-Key": EMERGENT_PUSH_KEY},
+    timeout=10.0,
+)
+
+
+class RegisterPushIn(BaseModel):
+    user_id: str
+    platform: str
+    device_token: str
+
+
+@api_router.post("/register-push", status_code=201)
+async def register_push(body: RegisterPushIn):
+    resp = await _push_client.post("/api/v1/push/users/register", json=body.model_dump())
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+    await db.push_registrations.update_one(
+        {"user_id": body.user_id},
+        {"$set": {"platform": body.platform, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"status": "registered"}
+
+
+async def send_push(recipients: List[str], data: dict, idempotency_key: Optional[str] = None) -> None:
+    if not recipients:
+        return
+    if len(recipients) > 100:
+        raise ValueError("max 100 recipients per /trigger call; chunk before sending")
+    if "title" not in data or "message" not in data:
+        raise ValueError("data must include title and message")
+    payload: dict = {"recipients": recipients, "data": data}
+    if idempotency_key:
+        payload["$idempotency_key"] = idempotency_key
+    resp = await _push_client.post("/api/v1/push/trigger", json=payload)
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
 # Public config
 # ---------------------------------------------------------------------------
 
@@ -439,6 +611,7 @@ async def config():
             "sarvam": bool(keys.get("sarvam_api_key")),
             "azure": bool(keys.get("azure_api_key")),
             "elevenlabs": bool(keys.get("elevenlabs_api_key")),
+            "openai": bool(EMERGENT_LLM_KEY),
         },
         "llm_ready": True,
     }
@@ -544,6 +717,82 @@ async def file_attachment(attachment_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Image generation (OpenAI gpt-image-1 via Emergent key)
+# ---------------------------------------------------------------------------
+
+_image_gen = OpenAIImageGeneration(api_key=EMERGENT_LLM_KEY)
+
+
+class GenImageIn(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1000)
+    conversation_id: str = "guest"
+
+
+@api_router.post("/generate-image")
+async def generate_image(body: GenImageIn, user: Optional[User] = Depends(optional_user)):
+    try:
+        images = await _image_gen.generate_images(
+            prompt=body.prompt, model="gpt-image-1", number_of_images=1
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Image generation failed: {str(e)[:200]}")
+    if not images:
+        raise HTTPException(502, "No image was generated")
+    raw = images[0]
+    owner = user.user_id if user else "guest"
+    path = f"{STORAGE_APP}/uploads/{owner}/{uuid.uuid4().hex}.png"
+    await run_in_threadpool(put_object, path, raw, "image/png")
+    att = Attachment(id=uuid.uuid4().hex, kind="image", name="generated.png",
+                     mime="image/png", storage_path=path)
+    await db.attachments.insert_one({**att.model_dump(), "owner": owner,
+                                     "created_at": datetime.now(timezone.utc)})
+    user_doc = ChatMessage(user_id=user.user_id if user else None,
+                           conversation_id=body.conversation_id, role="user", text=body.prompt)
+    await db.messages.insert_one(user_doc.to_mongo())
+    a_doc = ChatMessage(user_id=user.user_id if user else None,
+                        conversation_id=body.conversation_id, role="assistant",
+                        text="", attachments=[att])
+    await db.messages.insert_one(a_doc.to_mongo())
+    if user and ObjectId.is_valid(body.conversation_id):
+        await db.conversations.update_one(
+            {"_id": ObjectId(body.conversation_id)},
+            {"$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
+    return {"message_id": str(a_doc.id),
+            "attachment": {**att.model_dump(), "url": f"/api/files/attachment/{att.id}"}}
+
+
+# ---------------------------------------------------------------------------
+# Speech-to-Speech (ElevenLabs voice changer)
+# ---------------------------------------------------------------------------
+
+@api_router.post("/sts")
+async def sts(file: UploadFile = File(...), voice_model_id: str = Form("")):
+    s = await get_settings()
+    keys = await get_keys()
+    key = keys.get("elevenlabs_sts_api_key") or keys.get("elevenlabs_api_key")
+    if not key:
+        raise HTTPException(400, "ElevenLabs key is not configured. Add it in Developer Options.")
+    vm = await _resolve_voice_model(s, voice_model_id or None)
+    target_voice = vm.voice_id if vm.provider == "elevenlabs" else "21m00Tcm4TlvDq8ikWAM"
+    data = await file.read()
+    if len(data) > 25_000_000:
+        raise HTTPException(413, "Audio too large")
+    async with httpx.AsyncClient(timeout=180) as c:
+        r = await c.post(
+            f"https://api.elevenlabs.io/v1/speech-to-speech/{target_voice}",
+            params={"output_format": "mp3_44100_128"},
+            headers={"xi-api-key": key},
+            files={"audio": (file.filename or "audio.m4a", data, file.content_type or "audio/m4a")},
+            data={"model_id": "eleven_multilingual_sts_v2"},
+        )
+    if r.is_error:
+        raise HTTPException(502, f"ElevenLabs STS error: {r.text[:300]}")
+    return {"mime": "audio/mpeg", "audio_base64": base64.b64encode(r.content).decode(),
+            "voice_model_id": vm.id}
+
+
+# ---------------------------------------------------------------------------
 # Chat (streaming)
 # ---------------------------------------------------------------------------
 
@@ -571,7 +820,13 @@ async def chat(body: ChatIn, user: Optional[User] = Depends(optional_user)):
         provider, model_name = "gemini", s.vision_model
         llm_key = EMERGENT_LLM_KEY  # vision routed through the universal key
     else:
-        provider, model_name = "openai", s.llm_model
+        model_name = s.llm_model
+        if model_name.startswith("gemini"):
+            provider, llm_key = "gemini", EMERGENT_LLM_KEY
+        elif model_name.startswith("claude"):
+            provider, llm_key = "anthropic", EMERGENT_LLM_KEY
+        else:
+            provider = "openai"
 
     history_docs = await db.messages.find(
         _scope(user, body.conversation_id)
@@ -581,7 +836,6 @@ async def chat(body: ChatIn, user: Optional[User] = Depends(optional_user)):
         for d in reversed(history_docs)
         if d.get("role") in ("user", "assistant") and d.get("text")
     ]
-    messages = [{"role": "system", "content": s.system_prompt}] + history
 
     attachments_meta = [
         Attachment(id=d["id"], kind=d["kind"], name=d["name"], mime=d["mime"],
@@ -625,7 +879,7 @@ async def chat(body: ChatIn, user: Optional[User] = Depends(optional_user)):
                 api_key=llm_key,
                 session_id=f"kosher-{uuid.uuid4().hex}",
                 system_message=s.system_prompt,
-                initial_messages=messages,
+                initial_messages=history,
             ).with_model(provider, model_name)
             um = UserMessage(text=text or "یہٕ فایل چھِ وُچھِتھ کٲشُر منز جواب دِیو۔",
                              file_contents=file_contents or None)
@@ -750,6 +1004,25 @@ async def _resolve_voice_model(s: Settings, voice_model_id: Optional[str]) -> Vo
     raise HTTPException(400, "No voice models configured")
 
 
+import re as _re
+
+_openai_tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+OPENAI_TTS_VOICES = {"alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+                     "ballad", "verse"}
+DEFAULT_TTS_INSTRUCTIONS = (
+    "Speak in a warm, friendly and natural conversational tone, like a gentle, helpful "
+    "Kashmiri friend. Keep a calm, unhurried pace with soft, respectful delivery."
+)
+
+
+def clean_for_tts(text: str) -> str:
+    """Strip markdown/URLs/emoji-ish noise so TTS does not read them aloud."""
+    text = _re.sub(r"https?://\S+", "", text)
+    text = _re.sub(r"`{1,3}[^`]*`{1,3}", "", text)
+    text = _re.sub(r"[*_#>~|`]", "", text)
+    return _re.sub(r"\s+", " ", text).strip()
+
+
 async def _tts(text: str, vm: VoiceModel, keys: Dict[str, Optional[str]]) -> Dict[str, Any]:
     if vm.provider == "sarvam":
         key = keys.get("sarvam_api_key")
@@ -801,6 +1074,25 @@ async def _tts(text: str, vm: VoiceModel, keys: Dict[str, Optional[str]]) -> Dic
             raise HTTPException(502, f"Azure TTS error: {r.text[:300]}")
         return {"mime": "audio/mpeg", "audio_base64": base64.b64encode(r.content).decode(), "voice_model_id": vm.id}
 
+    if vm.provider == "openai":
+        # Emergent-managed OpenAI TTS (uses the Emergent universal key — no user key).
+        voice = vm.voice_id if vm.voice_id in OPENAI_TTS_VOICES else "coral"
+        model = vm.model_name or "gpt-4o-mini-tts"
+        kwargs: Dict[str, Any] = {
+            "text": clean_for_tts(text)[:4000],
+            "model": model,
+            "voice": voice,
+            "response_format": "mp3",
+        }
+        # `instructions` steers delivery and is ONLY valid for gpt-4o-mini-tts.
+        if model == "gpt-4o-mini-tts":
+            kwargs["instructions"] = vm.instructions or DEFAULT_TTS_INSTRUCTIONS
+        try:
+            audio = await _openai_tts.generate_speech(**kwargs)
+        except Exception as e:
+            raise HTTPException(502, f"Emergent TTS error: {str(e)[:200]}")
+        return {"mime": "audio/mpeg", "audio_base64": base64.b64encode(audio).decode(), "voice_model_id": vm.id}
+
     raise HTTPException(400, f"Unsupported TTS provider: {vm.provider}")
 
 
@@ -819,6 +1111,32 @@ async def tts(body: TtsIn):
 async def require_dev(x_dev_token: str = Header(default="")):
     if not x_dev_token or not hmac.compare_digest(x_dev_token, DEV_TOKEN):
         raise HTTPException(401, "Invalid developer token")
+
+
+@api_router.post("/dev/push-test", dependencies=[Depends(require_dev)])
+async def dev_push_test():
+    """Send the daily 'come chat in Kashmiri' reminder to all registered devices.
+    Wired for manual/scheduled triggering; the actual schedule can be decided later."""
+    users = await db.push_registrations.distinct("user_id")
+    if not users:
+        return {"sent": 0, "detail": "No registered devices yet"}
+    sent = 0
+    for i in range(0, len(users), 100):
+        chunk = users[i:i + 100]
+        try:
+            await send_push(
+                chunk,
+                {
+                    "title": "کوشَر اے آی",
+                    "message": "ییِو، اَسہِ سٟتؠ کٲشُر منز گٲپھ کریو!",
+                    "action_url": "/",
+                },
+                idempotency_key=f"daily-{datetime.now(timezone.utc):%Y%m%d}",
+            )
+            sent += len(chunk)
+        except Exception as e:
+            logger.warning("push reminder failed (non-blocking): %s", e)
+    return {"sent": sent}
 
 
 class UnlockIn(BaseModel):
